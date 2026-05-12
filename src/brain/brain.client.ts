@@ -63,11 +63,11 @@ export class BrainClient {
     }
   }
 
-  private async post<T>(
+  private async post<S extends z.ZodTypeAny>(
     path: string,
     body: unknown,
-    responseSchema: z.ZodSchema<T>
-  ): Promise<T> {
+    responseSchema: S
+  ): Promise<z.output<S>> {
     this.checkBreaker();
 
     let lastError: unknown;
@@ -93,11 +93,11 @@ export class BrainClient {
     throw new BrainUnavailableError(lastError);
   }
 
-  private async doRequest<T>(
+  private async doRequest<S extends z.ZodTypeAny>(
     path: string,
     body: unknown,
-    responseSchema: z.ZodSchema<T>
-  ): Promise<T> {
+    responseSchema: S
+  ): Promise<z.output<S>> {
     const url = `${this.cfg.baseUrl.replace(/\/$/, '')}${path}`;
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), this.cfg.timeoutMs);

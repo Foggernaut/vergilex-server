@@ -24,7 +24,10 @@ export const findDocuments: RequestHandler = async (req, res, next) => {
       amount: CREDIT_COSTS.doc_finder,
       type: 'doc_finder',
       description: input.query.slice(0, 200),
-      metadata: { results_count: result.documents.length },
+      metadata: {
+        results_count: result.documents.length,
+        cost: result.cost,
+      },
     });
 
     await supabaseAdmin.from('search_history').insert({

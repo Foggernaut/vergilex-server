@@ -1,11 +1,17 @@
 import { supabaseAdmin } from '../../config/supabase.js';
 import { brainClient } from '../../brain/brain.client.js';
 import type {
+  AnswerLength,
   BrainAnswerRequest,
   BrainAnswerResponse,
   BrainHistoryItem,
 } from '../../brain/brain.types.js';
-import { CREDIT_COSTS } from '../../utils/creditCosts.js';
+import {
+  CREDIT_COSTS,
+  DEFAULT_ANSWER_LENGTH,
+  chatCost,
+  followUpCost,
+} from '../../utils/creditCosts.js';
 import { deductCredits } from '../credits/credits.service.js';
 import { NotFoundError } from '../../utils/errors.js';
 
@@ -24,7 +30,13 @@ interface PersistedMessage {
     confidence_score: number;
     not_found: boolean;
     credits_used: number;
-    tokens_used: BrainAnswerResponse['tokens_used'];
+    tokens_used: {
+      prompt: number;
+      completion: number;
+      cost: BrainAnswerResponse['cost'];
+    };
+    cost_usd: number | null;
+    answer_length: AnswerLength | null;
     created_at: string;
   };
 }
@@ -36,14 +48,18 @@ export async function startConversation(args: {
   userId: string;
   query: string;
   filters?: { law_id?: string | null };
+  answer_length?: AnswerLength;
 }): Promise<PersistedMessage> {
+  const length = args.answer_length ?? DEFAULT_ANSWER_LENGTH;
+
   const brainReq: BrainAnswerRequest = {
     query: args.query,
     filters: args.filters,
+    answer_length: length,
   };
   const answer = await brainClient.answer(brainReq);
 
-  const cost = CREDIT_COSTS.chat;
+  const cost = chatCost(length);
   const { newBalance } = await deductCredits({
     userId: args.userId,
     amount: cost,
@@ -52,6 +68,8 @@ export async function startConversation(args: {
     metadata: {
       tokens_used: answer.tokens_used,
       confidence: answer.confidence_score,
+      cost: answer.cost,
+      answer_length: length,
     },
   });
 
@@ -79,6 +97,12 @@ export async function startConversation(args: {
     },
   ]);
 
+  const tokensUsedJsonb = {
+    prompt: answer.tokens_used.prompt,
+    completion: answer.tokens_used.completion,
+    cost: answer.cost,
+  };
+
   const { data: assistantMsg, error: msgError } = await supabaseAdmin
     .from('messages')
     .insert({
@@ -90,13 +114,16 @@ export async function startConversation(args: {
       confidence_score: answer.confidence_score,
       not_found: answer.not_found,
       credits_used: cost,
-      tokens_used: answer.tokens_used,
+      tokens_used: tokensUsedJsonb,
+      cost_usd: answer.cost.total_usd,
+      answer_length: length,
     })
-    .select('id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, created_at')
+    .select(
+      'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, created_at'
+    )
     .single();
   if (msgError || !assistantMsg) throw msgError ?? new Error('Message insert failed');
 
-  // search_history
   await supabaseAdmin.from('search_history').insert({
     user_id: args.userId,
     query: args.query,
@@ -119,8 +146,10 @@ export async function followUp(args: {
   userId: string;
   conversationId: string;
   query: string;
+  answer_length?: AnswerLength;
 }): Promise<PersistedMessage> {
-  // Verify conversation belongs to user
+  const length = args.answer_length ?? DEFAULT_ANSWER_LENGTH;
+
   const { data: conv, error: convError } = await supabaseAdmin
     .from('conversations')
     .select('id, user_id, filters, total_credits_used')
@@ -131,7 +160,6 @@ export async function followUp(args: {
     throw new NotFoundError('Sohbet bulunamadı');
   }
 
-  // Load last N turns
   const { data: prior, error: priorError } = await supabaseAdmin
     .from('messages')
     .select('role, content, created_at')
@@ -148,9 +176,10 @@ export async function followUp(args: {
     query: args.query,
     filters: (conv.filters ?? undefined) as { law_id?: string | null } | undefined,
     history,
+    answer_length: length,
   });
 
-  const cost = CREDIT_COSTS.follow_up;
+  const cost = followUpCost(length);
   const { newBalance } = await deductCredits({
     userId: args.userId,
     amount: cost,
@@ -160,6 +189,8 @@ export async function followUp(args: {
       conversationId: args.conversationId,
       tokens_used: answer.tokens_used,
       confidence: answer.confidence_score,
+      cost: answer.cost,
+      answer_length: length,
     },
   });
 
@@ -172,6 +203,12 @@ export async function followUp(args: {
     },
   ]);
 
+  const tokensUsedJsonb = {
+    prompt: answer.tokens_used.prompt,
+    completion: answer.tokens_used.completion,
+    cost: answer.cost,
+  };
+
   const { data: assistantMsg, error: msgError } = await supabaseAdmin
     .from('messages')
     .insert({
@@ -183,9 +220,13 @@ export async function followUp(args: {
       confidence_score: answer.confidence_score,
       not_found: answer.not_found,
       credits_used: cost,
-      tokens_used: answer.tokens_used,
+      tokens_used: tokensUsedJsonb,
+      cost_usd: answer.cost.total_usd,
+      answer_length: length,
     })
-    .select('id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, created_at')
+    .select(
+      'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, created_at'
+    )
     .single();
   if (msgError || !assistantMsg) throw msgError ?? new Error('Message insert failed');
 
@@ -233,7 +274,9 @@ export async function getConversation(userId: string, conversationId: string) {
   }
   const { data: messages, error: msgError } = await supabaseAdmin
     .from('messages')
-    .select('id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, created_at')
+    .select(
+      'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, created_at'
+    )
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: true });
   if (msgError) throw msgError;
@@ -268,3 +311,6 @@ function deriveTitle(query: string): string {
   if (trimmed.length <= TITLE_MAX) return trimmed;
   return trimmed.slice(0, TITLE_MAX - 1) + '…';
 }
+
+// Re-export so older callers that imported CREDIT_COSTS still work.
+export { CREDIT_COSTS };
