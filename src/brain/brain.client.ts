@@ -1,4 +1,4 @@
-import { request } from 'undici';
+import { FormData, request } from 'undici';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import {
@@ -10,6 +10,8 @@ import {
   BrainValidationError,
 } from './brain.errors.js';
 import {
+  type BrainAnalyzeDocumentResponse,
+  BrainAnalyzeDocumentResponseSchema,
   type BrainAnswerRequest,
   type BrainAnswerResponse,
   BrainAnswerResponseSchema,
@@ -48,6 +50,25 @@ export class BrainClient {
 
   async answer(req: BrainAnswerRequest): Promise<BrainAnswerResponse> {
     return this.post('/answer-questions', req, BrainAnswerResponseSchema);
+  }
+
+  // --- v2 opt-in endpoints (Agentic RAG) ---
+
+  async answerV2(req: BrainAnswerRequest): Promise<BrainAnswerResponse> {
+    return this.post('/v2/answer-questions', req, BrainAnswerResponseSchema);
+  }
+
+  async findDocumentsV2(req: BrainFindDocumentsRequest): Promise<BrainFindDocumentsResponse> {
+    return this.post('/v2/find-documents', req, BrainFindDocumentsResponseSchema);
+  }
+
+  async analyzeDocument(input: {
+    file: Buffer;
+    filename: string;
+    mimeType: string;
+    query?: string;
+  }): Promise<BrainAnalyzeDocumentResponse> {
+    return this.postMultipart('/v2/analyze-document', input, BrainAnalyzeDocumentResponseSchema);
   }
 
   async health(): Promise<{ status: string }> {
@@ -169,6 +190,100 @@ export class BrainClient {
       });
       throw new BrainSchemaError(parsed.error);
     }
+    return parsed.data;
+  }
+
+  private async postMultipart<S extends z.ZodTypeAny>(
+    path: string,
+    input: { file: Buffer; filename: string; mimeType: string; query?: string },
+    responseSchema: S
+  ): Promise<z.output<S>> {
+    this.checkBreaker();
+
+    const url = `${this.cfg.baseUrl.replace(/\/$/, '')}${path}`;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), this.cfg.timeoutMs);
+    const started = Date.now();
+    logger.info('Brain multipart request →', {
+      url,
+      filename: input.filename,
+      size: input.file.byteLength,
+      timeoutMs: this.cfg.timeoutMs,
+    });
+
+    let res;
+    try {
+      const form = new FormData();
+      const blob = new Blob([new Uint8Array(input.file)], { type: input.mimeType });
+      form.append('file', blob, input.filename);
+      if (input.query) form.append('query', input.query);
+
+      res = await request(url, {
+        method: 'POST',
+        headers: { 'x-api-key': this.cfg.apiKey },
+        body: form,
+        signal: ctrl.signal,
+      });
+    } catch (err: unknown) {
+      const error = err as { name?: string; code?: string; message?: string };
+      logger.error('Brain multipart request failed (network)', {
+        url,
+        name: error?.name,
+        code: error?.code,
+        message: error?.message,
+        durationMs: Date.now() - started,
+      });
+      this.recordFailure();
+      if (error?.name === 'AbortError') throw new BrainTimeoutError(err);
+      throw new BrainUnavailableError(err);
+    } finally {
+      clearTimeout(t);
+    }
+
+    const status = res.statusCode;
+    logger.info('Brain multipart response ←', { url, status, durationMs: Date.now() - started });
+
+    if (status === 403 || status === 401) {
+      this.recordFailure();
+      throw new BrainAuthError();
+    }
+    if (status === 400 || status === 422) {
+      let details: unknown;
+      try {
+        details = await res.body.json();
+      } catch {
+        /* noop */
+      }
+      this.recordFailure();
+      throw new BrainValidationError(details);
+    }
+    if (status >= 500 || status === 429) {
+      this.recordFailure();
+      throw new BrainUnavailableError({ status });
+    }
+    if (status < 200 || status >= 300) {
+      this.recordFailure();
+      throw new BrainUnavailableError({ status });
+    }
+
+    let raw: unknown;
+    try {
+      raw = await res.body.json();
+    } catch (err) {
+      this.recordFailure();
+      throw new BrainSchemaError(err);
+    }
+
+    const parsed = responseSchema.safeParse(raw);
+    if (!parsed.success) {
+      logger.error('Brain multipart response schema mismatch', {
+        path,
+        issues: parsed.error.flatten(),
+      });
+      this.recordFailure();
+      throw new BrainSchemaError(parsed.error);
+    }
+    this.recordSuccess();
     return parsed.data;
   }
 

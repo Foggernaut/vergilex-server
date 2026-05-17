@@ -95,3 +95,23 @@ export const BrainAnswerResponseSchema = z.object({
   cost: BrainCostSchema.default(EMPTY_COST),
 });
 export type BrainAnswerResponse = z.infer<typeof BrainAnswerResponseSchema>;
+
+// --- v2 analyze-document ---
+
+export const BrainAnalyzeChunkPreviewSchema = z.object({
+  text_preview: z.string(),
+  page_or_section: z.string().nullable(),
+  keywords: z.array(z.string()),
+});
+export type BrainAnalyzeChunkPreview = z.infer<typeof BrainAnalyzeChunkPreviewSchema>;
+
+export const BrainAnalyzeDocumentResponseSchema = z.object({
+  total_pages: z.number().int(),
+  total_chars: z.number().int(),
+  chunk_count: z.number().int(),
+  detected_concepts: z.array(z.string()),
+  chunks_preview: z.array(BrainAnalyzeChunkPreviewSchema),
+  file_too_large: z.boolean(),
+  error: z.string().nullable(),
+});
+export type BrainAnalyzeDocumentResponse = z.infer<typeof BrainAnalyzeDocumentResponseSchema>;

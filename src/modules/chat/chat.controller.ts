@@ -18,6 +18,7 @@ export const createChat: RequestHandler = async (req, res, next) => {
       query: input.query,
       filters: input.filters,
       answer_length: input.answer_length,
+      engine: 'v1',
     });
     res.status(201).json(result);
   } catch (err) {
@@ -35,6 +36,7 @@ export const followUpChat: RequestHandler = async (req, res, next) => {
       conversationId: id,
       query: input.query,
       answer_length: input.answer_length,
+      expectedEngine: 'v1',
     });
     res.json(result);
   } catch (err) {
