@@ -93,8 +93,27 @@ export const BrainAnswerResponseSchema = z.object({
   not_found: z.boolean(),
   secondary_legislation_note: z.string().nullable(),
   cost: BrainCostSchema.default(EMPTY_COST),
+  // B12.9: audited request id — echoed back so we can submit it to /v2/feedback.
+  // null on the legacy v1 path (unaudited).
+  request_id: z.string().nullable().optional(),
 });
 export type BrainAnswerResponse = z.infer<typeof BrainAnswerResponseSchema>;
+
+// --- v2 feedback (👍/👎) ---
+
+export const BrainFeedbackRequestSchema = z.object({
+  request_id: z.string().min(1).max(64),
+  rating: z.number().int().min(1).max(5),
+  note: z.string().max(1000).optional(),
+  user_id: z.string().max(64).optional(),
+});
+export type BrainFeedbackRequest = z.infer<typeof BrainFeedbackRequestSchema>;
+
+export const BrainFeedbackResponseSchema = z.object({
+  success: z.boolean(),
+  error: z.string().nullable().optional(),
+});
+export type BrainFeedbackResponse = z.infer<typeof BrainFeedbackResponseSchema>;
 
 // --- v2 analyze-document ---
 

@@ -15,6 +15,9 @@ import {
   type BrainAnswerRequest,
   type BrainAnswerResponse,
   BrainAnswerResponseSchema,
+  type BrainFeedbackRequest,
+  type BrainFeedbackResponse,
+  BrainFeedbackResponseSchema,
   type BrainFindDocumentsRequest,
   type BrainFindDocumentsResponse,
   BrainFindDocumentsResponseSchema,
@@ -29,7 +32,10 @@ interface CircuitBreakerState {
 const FAILURE_THRESHOLD = 5;
 const OPEN_DURATION_MS = 30_000;
 const RETRY_STATUSES = new Set([502, 503, 504]);
-const MAX_RETRIES = 2;
+// Retry disabled: brain V2 pipeline can take 100-150s with the agent path.
+// A retry here would issue a fresh brain request (no idempotency on brain
+// side), creating duplicate audit entries and triple-billing the LLM calls.
+const MAX_RETRIES = 0;
 
 const HealthSchema = z.object({ status: z.string() }).passthrough();
 
@@ -60,6 +66,10 @@ export class BrainClient {
 
   async findDocumentsV2(req: BrainFindDocumentsRequest): Promise<BrainFindDocumentsResponse> {
     return this.post('/v2/find-documents', req, BrainFindDocumentsResponseSchema);
+  }
+
+  async submitFeedback(req: BrainFeedbackRequest): Promise<BrainFeedbackResponse> {
+    return this.post('/v2/feedback', req, BrainFeedbackResponseSchema);
   }
 
   async analyzeDocument(input: {

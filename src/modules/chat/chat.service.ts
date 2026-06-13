@@ -42,6 +42,8 @@ interface PersistedMessage {
     answer_length: AnswerLength | null;
     engine: ChatEngine;
     created_at: string;
+    brain_request_id: string | null;
+    feedback_rating: number | null;
   };
 }
 
@@ -145,6 +147,7 @@ export async function startConversation(args: {
       conflicts: answer.conflicts,
       confidence_score: answer.confidence_score,
       not_found: answer.not_found,
+      brain_request_id: answer.request_id ?? null,
       credits_used: cost,
       tokens_used: tokensUsedJsonb,
       cost_usd: answer.cost.total_usd,
@@ -152,7 +155,7 @@ export async function startConversation(args: {
       engine,
     })
     .select(
-      'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at'
+      'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating'
     )
     .single();
   if (msgError || !assistantMsg) throw msgError ?? new Error('Message insert failed');
@@ -276,6 +279,7 @@ export async function followUp(args: {
       conflicts: answer.conflicts,
       confidence_score: answer.confidence_score,
       not_found: answer.not_found,
+      brain_request_id: answer.request_id ?? null,
       credits_used: cost,
       tokens_used: tokensUsedJsonb,
       cost_usd: answer.cost.total_usd,
@@ -283,7 +287,7 @@ export async function followUp(args: {
       engine,
     })
     .select(
-      'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at'
+      'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating'
     )
     .single();
   if (msgError || !assistantMsg) throw msgError ?? new Error('Message insert failed');
@@ -333,7 +337,7 @@ export async function getConversation(userId: string, conversationId: string) {
   const { data: messages, error: msgError } = await supabaseAdmin
     .from('messages')
     .select(
-      'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at'
+      'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating'
     )
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: true });

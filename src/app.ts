@@ -12,6 +12,7 @@ import { userRouter } from './modules/user/user.routes.js';
 import { chatRouter } from './modules/chat/chat.routes.js';
 import { documentsRouter } from './modules/documents/documents.routes.js';
 import { favoritesRouter } from './modules/favorites/favorites.routes.js';
+import { feedbackRouter } from './modules/feedback/feedback.routes.js';
 import { v2DemoRouter } from './modules/v2-demo/v2demo.routes.js';
 
 export function createApp(): Express {
@@ -53,6 +54,7 @@ export function createApp(): Express {
   app.use('/api/chat', chatRouter);
   app.use('/api/belge-bul', documentsRouter);
   app.use('/api/favorites', favoritesRouter);
+  app.use('/api/feedback', feedbackRouter);
   app.use('/api/v2-demo', v2DemoRouter);
 
   app.use((_req, res) => {
