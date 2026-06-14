@@ -2,15 +2,36 @@ import { z } from 'zod';
 
 // Mirrors mevzuat-knowledge-api v2 Pydantic models.
 
+// Known source types the brain can emit. Kept for typed downstream use, but
+// the schema below intentionally does NOT gate parsing on this list: the brain
+// adds new corpora over time (e.g. ansiklopedi/makale/bdk/danistay_karar), and
+// a strict z.enum would reject the WHOLE response the moment a new value lands.
+export const KNOWN_SOURCE_TYPES = [
+  'chunk',
+  'table',
+  'footnote',
+  'ozelge',
+  'soru_cevap',
+  'ansiklopedi',
+  'makale',
+  'bdk',
+  'danistay_karar',
+] as const;
+export type BrainSourceType = (typeof KNOWN_SOURCE_TYPES)[number];
+
 export const BrainDocumentResultSchema = z.object({
   chunk_id: z.string(),
   law_id: z.string(),
   law_name: z.string(),
   madde_no: z.string().nullable(),
   madde_basligi: z.string().nullable(),
+  // Pre-formatted UI header from the brain (picks the right format per
+  // source_type). Optional/nullable so older brain responses still parse.
+  title: z.string().nullable().optional(),
   excerpt: z.string(),
   relevance_score: z.number(),
-  source_type: z.enum(['chunk', 'table', 'ozelge', 'soru_cevap', 'footnote']),
+  // Permissive on purpose — see KNOWN_SOURCE_TYPES above.
+  source_type: z.string(),
   law_references: z.array(z.string()),
 });
 export type BrainDocumentResult = z.infer<typeof BrainDocumentResultSchema>;
