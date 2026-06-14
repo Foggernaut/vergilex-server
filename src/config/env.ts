@@ -11,7 +11,7 @@ const envSchema = z.object({
 
   BRAIN_API_URL: z.string().url(),
   BRAIN_API_KEY: z.string().min(1),
-  BRAIN_TIMEOUT_MS: z.coerce.number().int().positive().default(90000),
+  BRAIN_TIMEOUT_MS: z.coerce.number().int().positive().default(300000),
 
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
 

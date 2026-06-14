@@ -2,15 +2,36 @@ import { z } from 'zod';
 
 // Mirrors mevzuat-knowledge-api v2 Pydantic models.
 
+// Known source types the brain can emit. Kept for typed downstream use, but
+// the schema below intentionally does NOT gate parsing on this list: the brain
+// adds new corpora over time (e.g. ansiklopedi/makale/bdk/danistay_karar), and
+// a strict z.enum would reject the WHOLE response the moment a new value lands.
+export const KNOWN_SOURCE_TYPES = [
+  'chunk',
+  'table',
+  'footnote',
+  'ozelge',
+  'soru_cevap',
+  'ansiklopedi',
+  'makale',
+  'bdk',
+  'danistay_karar',
+] as const;
+export type BrainSourceType = (typeof KNOWN_SOURCE_TYPES)[number];
+
 export const BrainDocumentResultSchema = z.object({
   chunk_id: z.string(),
   law_id: z.string(),
   law_name: z.string(),
   madde_no: z.string().nullable(),
   madde_basligi: z.string().nullable(),
+  // Pre-formatted UI header from the brain (picks the right format per
+  // source_type). Optional/nullable so older brain responses still parse.
+  title: z.string().nullable().optional(),
   excerpt: z.string(),
   relevance_score: z.number(),
-  source_type: z.enum(['chunk', 'table', 'ozelge', 'soru_cevap', 'footnote']),
+  // Permissive on purpose — see KNOWN_SOURCE_TYPES above.
+  source_type: z.string(),
   law_references: z.array(z.string()),
 });
 export type BrainDocumentResult = z.infer<typeof BrainDocumentResultSchema>;
@@ -93,5 +114,44 @@ export const BrainAnswerResponseSchema = z.object({
   not_found: z.boolean(),
   secondary_legislation_note: z.string().nullable(),
   cost: BrainCostSchema.default(EMPTY_COST),
+  // B12.9: audited request id — echoed back so we can submit it to /v2/feedback.
+  // null on the legacy v1 path (unaudited).
+  request_id: z.string().nullable().optional(),
 });
 export type BrainAnswerResponse = z.infer<typeof BrainAnswerResponseSchema>;
+
+// --- v2 feedback (👍/👎) ---
+
+export const BrainFeedbackRequestSchema = z.object({
+  request_id: z.string().min(1).max(64),
+  rating: z.number().int().min(1).max(5),
+  note: z.string().max(1000).optional(),
+  user_id: z.string().max(64).optional(),
+});
+export type BrainFeedbackRequest = z.infer<typeof BrainFeedbackRequestSchema>;
+
+export const BrainFeedbackResponseSchema = z.object({
+  success: z.boolean(),
+  error: z.string().nullable().optional(),
+});
+export type BrainFeedbackResponse = z.infer<typeof BrainFeedbackResponseSchema>;
+
+// --- v2 analyze-document ---
+
+export const BrainAnalyzeChunkPreviewSchema = z.object({
+  text_preview: z.string(),
+  page_or_section: z.string().nullable(),
+  keywords: z.array(z.string()),
+});
+export type BrainAnalyzeChunkPreview = z.infer<typeof BrainAnalyzeChunkPreviewSchema>;
+
+export const BrainAnalyzeDocumentResponseSchema = z.object({
+  total_pages: z.number().int(),
+  total_chars: z.number().int(),
+  chunk_count: z.number().int(),
+  detected_concepts: z.array(z.string()),
+  chunks_preview: z.array(BrainAnalyzeChunkPreviewSchema),
+  file_too_large: z.boolean(),
+  error: z.string().nullable(),
+});
+export type BrainAnalyzeDocumentResponse = z.infer<typeof BrainAnalyzeDocumentResponseSchema>;

@@ -1,10 +1,20 @@
 import type { ErrorRequestHandler } from 'express';
 import { ZodError } from 'zod';
+import multer from 'multer';
 import { AppError } from '../utils/errors.js';
 import { BrainError } from '../brain/brain.errors.js';
 import { logger } from '../config/logger.js';
 
 export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
+  if (err instanceof multer.MulterError) {
+    const message =
+      err.code === 'LIMIT_FILE_SIZE'
+        ? 'Dosya boyutu 10MB sınırını aşıyor'
+        : 'Dosya yüklenemedi';
+    res.status(400).json({ error: { code: err.code, message } });
+    return;
+  }
+
   if (err instanceof ZodError) {
     res.status(400).json({
       error: { code: 'VALIDATION_ERROR', message: 'Geçersiz istek', details: err.flatten() },

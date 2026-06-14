@@ -10,9 +10,13 @@ const cachedDataSchema = z
     law_name: z.string(),
     madde_no: z.string(),
     madde_basligi: z.string().nullable(),
+    title: z.string().nullable().optional(),
     excerpt: z.string(),
     relevance_score: z.number(),
-    source_type: z.enum(['chunk', 'table', 'ozelge', 'soru_cevap', 'footnote']),
+    // Permissive — mirrors BrainDocumentResultSchema; brain adds new corpora
+    // (ansiklopedi/makale/bdk/danistay_karar) and a strict enum would reject
+    // favoriting any source carrying a new type.
+    source_type: z.string(),
     law_references: z.array(z.string()),
   })
   .passthrough();
