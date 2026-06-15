@@ -1,9 +1,8 @@
 import type { RequestHandler } from 'express';
 import { z } from 'zod';
 import { brainClient } from '../../brain/brain.client.js';
-import { supabaseAdmin } from '../../config/supabase.js';
 import { AppError, AuthError } from '../../utils/errors.js';
-import { followUp, startConversation } from '../chat/chat.service.js';
+import { followUp, recordSearchHistory, startConversation } from '../chat/chat.service.js';
 import { streamConversation, streamFollowUp } from '../chat/chat.stream.service.js';
 import { SseWriter } from '../../utils/sse.js';
 
@@ -136,7 +135,9 @@ export const analyzeDocument: RequestHandler = async (req, res, next) => {
 
     // Record the analysis in search_history so it shows up in Geçmiş.
     // The "query" column gets the filename; results_count = detected concept count.
-    await supabaseAdmin.from('search_history').insert({
+    // Non-fatal + logged (see recordSearchHistory) so a constraint/RLS failure
+    // never silently drops the Geçmiş row.
+    await recordSearchHistory({
       user_id: req.user.id,
       query: file.originalname.slice(0, 200),
       search_type: 'v2_analyze',

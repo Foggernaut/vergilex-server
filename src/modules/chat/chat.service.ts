@@ -15,11 +15,54 @@ import {
 } from '../../utils/creditCosts.js';
 import { deductCredits } from '../credits/credits.service.js';
 import { NotFoundError } from '../../utils/errors.js';
+import { logger } from '../../config/logger.js';
 
 const MAX_HISTORY_TURNS = 6;
 const TITLE_MAX = 80;
 
 export type ChatEngine = 'v1' | 'v2';
+
+/**
+ * Write the "Geçmiş" (search history) shadow row. Intentionally NON-FATAL: a
+ * successful — and on V1, billed — chat must never be lost just because this
+ * secondary row failed. But the failure MUST surface in the logs. Previously
+ * the insert was fire-and-forget (`await supabaseAdmin...insert(...)` with no
+ * error check), so a chat could return 200 and persist its conversation yet
+ * never appear in Geçmiş with zero signal — e.g. the `search_type` CHECK
+ * constraint rejecting 'v2_chat'/'v2_analyze' when migration 008 hadn't been
+ * applied to the running database.
+ */
+export async function recordSearchHistory(row: {
+  user_id: string;
+  query: string;
+  search_type: string;
+  filters: unknown;
+  results_count: number;
+  // Chat rows link back to their conversation so Geçmiş can open it; null for
+  // doc_finder / analyze (no conversation).
+  conversation_id?: string | null;
+}): Promise<void> {
+  let { error } = await supabaseAdmin.from('search_history').insert(row);
+  // Graceful degradation: if the conversation_id column hasn't been migrated
+  // (012) onto this database yet, PostgREST rejects the insert for the unknown
+  // column. Retry without it so the Geçmiş row is still recorded (just not
+  // clickable) rather than lost entirely.
+  if (error && row.conversation_id != null && (error.code === 'PGRST204' || error.code === '42703')) {
+    const fallback = { ...row };
+    delete fallback.conversation_id;
+    ({ error } = await supabaseAdmin.from('search_history').insert(fallback));
+  }
+  if (error) {
+    logger.error('search_history insert failed — chat will be missing from Geçmiş', {
+      user_id: row.user_id,
+      search_type: row.search_type,
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
+  }
+}
 
 interface PersistedMessage {
   conversationId: string;
@@ -164,12 +207,13 @@ export async function startConversation(args: {
     .single();
   if (msgError || !assistantMsg) throw msgError ?? new Error('Message insert failed');
 
-  await supabaseAdmin.from('search_history').insert({
+  await recordSearchHistory({
     user_id: args.userId,
     query: args.query,
     search_type: billingType,
     filters: args.filters ?? null,
     results_count: answer.sources.length,
+    conversation_id: conv.id,
   });
 
   return {
@@ -304,12 +348,13 @@ export async function followUp(args: {
     .update({ total_credits_used: conv.total_credits_used + cost })
     .eq('id', args.conversationId);
 
-  await supabaseAdmin.from('search_history').insert({
+  await recordSearchHistory({
     user_id: args.userId,
     query: args.query,
     search_type: billingType,
     filters: conv.filters ?? null,
     results_count: answer.sources.length,
+    conversation_id: args.conversationId,
   });
 
   return {

@@ -56,13 +56,26 @@ export const getCredits: RequestHandler = async (req, res, next) => {
 export const getHistory: RequestHandler = async (req, res, next) => {
   try {
     if (!req.user) throw new AuthError();
+    const userId = req.user.id;
     const limit = Math.min(Number(req.query.limit ?? 50), 100);
-    const { data, error } = await supabaseAdmin
-      .from('search_history')
-      .select('id, query, search_type, filters, results_count, created_at')
-      .eq('user_id', req.user.id)
-      .order('created_at', { ascending: false })
-      .limit(limit);
+    const BASE_COLS = 'id, query, search_type, filters, results_count, created_at';
+    // `cols` is typed `string` (not a literal) so both calls share one loose
+    // row type — lets us reassign on the fallback path below.
+    const run = (cols: string) =>
+      supabaseAdmin
+        .from('search_history')
+        .select(cols)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+    let { data, error } = await run(`${BASE_COLS}, conversation_id`);
+    // Graceful degradation: if conversation_id hasn't been migrated (012) yet,
+    // selecting it errors with undefined_column — retry without it so Geçmiş
+    // still loads (rows just won't be clickable).
+    if (error && (error.code === '42703' || error.code === 'PGRST204')) {
+      ({ data, error } = await run(BASE_COLS));
+    }
     if (error) throw error;
     res.json({ history: data ?? [] });
   } catch (err) {
