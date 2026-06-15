@@ -120,6 +120,16 @@ export const BrainAnswerResponseSchema = z.object({
 });
 export type BrainAnswerResponse = z.infer<typeof BrainAnswerResponseSchema>;
 
+// --- v2 streaming (SSE) ---
+// Parsed events from POST /v2/answer-questions/stream. `phase` is the masked
+// coarse pipeline phase; `answer_delta` are typewriter chunks of the validated
+// answer; `complete` carries the authoritative full response we persist.
+export type BrainStreamEvent =
+  | { type: 'phase'; phase: string }
+  | { type: 'answer_delta'; text: string }
+  | { type: 'complete'; response: BrainAnswerResponse }
+  | { type: 'error'; code: string; message: string };
+
 // --- v2 feedback (👍/👎) ---
 
 export const BrainFeedbackRequestSchema = z.object({

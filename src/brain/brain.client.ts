@@ -5,6 +5,7 @@ import {
   BrainAuthError,
   BrainError,
   BrainSchemaError,
+  BrainStreamUnsupportedError,
   BrainTimeoutError,
   BrainUnavailableError,
   BrainValidationError,
@@ -21,6 +22,7 @@ import {
   type BrainFindDocumentsRequest,
   type BrainFindDocumentsResponse,
   BrainFindDocumentsResponseSchema,
+  type BrainStreamEvent,
 } from './brain.types.js';
 import { z } from 'zod';
 
@@ -66,6 +68,118 @@ export class BrainClient {
 
   async findDocumentsV2(req: BrainFindDocumentsRequest): Promise<BrainFindDocumentsResponse> {
     return this.post('/v2/find-documents', req, BrainFindDocumentsResponseSchema);
+  }
+
+  /**
+   * Streaming variant of answerV2. Consumes the brain's SSE response without
+   * buffering and yields parsed events (phase / answer_delta / complete / error).
+   * `signal` is wired to the client (browser) connection so a disconnect aborts
+   * the upstream brain request. Throws BrainStreamUnsupportedError on 404 so the
+   * caller can fall back to the buffered answerV2.
+   *
+   * NB: intentionally bypasses the circuit breaker + retry wrapper — a long-lived
+   * SSE stream has different failure semantics than a buffered POST, and the
+   * heartbeat keeps the socket alive so undici's body-inactivity timeout never fires.
+   */
+  async *answerV2Stream(
+    req: BrainAnswerRequest,
+    signal?: AbortSignal
+  ): AsyncGenerator<BrainStreamEvent> {
+    const url = `${this.cfg.baseUrl.replace(/\/$/, '')}/v2/answer-questions/stream`;
+    const started = Date.now();
+    logger.info('Brain stream request →', { url });
+
+    let res;
+    try {
+      res = await request(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'text/event-stream',
+          'x-api-key': this.cfg.apiKey,
+        },
+        body: JSON.stringify(req),
+        signal,
+      });
+    } catch (err: unknown) {
+      const error = err as { name?: string };
+      if (error?.name === 'AbortError') throw new BrainTimeoutError(err);
+      throw new BrainUnavailableError(err);
+    }
+
+    const status = res.statusCode;
+    logger.info('Brain stream response ←', { url, status, durationMs: Date.now() - started });
+    if (status === 404 || status === 405) {
+      res.body.dump().catch(() => {});
+      throw new BrainStreamUnsupportedError();
+    }
+    if (status === 403 || status === 401) throw new BrainAuthError();
+    if (status === 400 || status === 422) throw new BrainValidationError();
+    if (status < 200 || status >= 300) throw new BrainUnavailableError({ status });
+
+    // SSE frame parser: events separated by a blank line; each event has an
+    // `event:` type and one or more `data:` lines. Lines starting with ':' are
+    // heartbeat comments and are ignored.
+    let buffer = '';
+    try {
+      for await (const chunk of res.body) {
+        buffer += chunk.toString('utf8').replace(/\r\n/g, '\n');
+        let sep: number;
+        while ((sep = buffer.indexOf('\n\n')) !== -1) {
+          const frame = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          const ev = this.parseSseFrame(frame);
+          if (ev) yield ev;
+        }
+      }
+    } catch (err: unknown) {
+      const error = err as { name?: string };
+      if (error?.name === 'AbortError') throw new BrainTimeoutError(err);
+      throw new BrainUnavailableError(err);
+    }
+  }
+
+  private parseSseFrame(frame: string): BrainStreamEvent | null {
+    let event = 'message';
+    const dataLines: string[] = [];
+    for (const line of frame.split('\n')) {
+      if (!line || line.startsWith(':')) continue; // heartbeat / comment
+      if (line.startsWith('event:')) event = line.slice(6).trim();
+      else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''));
+    }
+    if (dataLines.length === 0) return null;
+    const raw = dataLines.join('\n');
+    let data: unknown;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+    const obj = data as Record<string, unknown>;
+    switch (event) {
+      case 'phase':
+        return { type: 'phase', phase: String(obj.phase ?? '') };
+      case 'answer_delta':
+        return { type: 'answer_delta', text: String(obj.text ?? '') };
+      case 'error':
+        return {
+          type: 'error',
+          code: String(obj.code ?? 'BRAIN_ERROR'),
+          message: String(obj.message ?? ''),
+        };
+      case 'complete': {
+        const parsed = BrainAnswerResponseSchema.safeParse(data);
+        if (!parsed.success) {
+          logger.error('Brain stream complete schema mismatch', {
+            issues: parsed.error.flatten(),
+          });
+          throw new BrainSchemaError(parsed.error);
+        }
+        return { type: 'complete', response: parsed.data };
+      }
+      default:
+        return null;
+    }
   }
 
   async submitFeedback(req: BrainFeedbackRequest): Promise<BrainFeedbackResponse> {

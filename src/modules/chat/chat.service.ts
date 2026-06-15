@@ -64,6 +64,10 @@ export async function startConversation(args: {
   filters?: { law_id?: string | null };
   answer_length?: AnswerLength;
   engine?: ChatEngine;
+  // When provided (streaming path), skip the brain call and persist this
+  // already-obtained, guardrail-validated answer. All billing + persistence
+  // below stays identical, so streamed and buffered turns are stored the same.
+  precomputedAnswer?: BrainAnswerResponse;
 }): Promise<PersistedMessage> {
   const length = args.answer_length ?? DEFAULT_ANSWER_LENGTH;
   const engine: ChatEngine = args.engine ?? 'v1';
@@ -73,9 +77,9 @@ export async function startConversation(args: {
     filters: args.filters,
     answer_length: length,
   };
-  const answer = engine === 'v2'
+  const answer = args.precomputedAnswer ?? (engine === 'v2'
     ? await brainClient.answerV2(brainReq)
-    : await brainClient.answer(brainReq);
+    : await brainClient.answer(brainReq));
 
   const cost = priceFor(engine, 'start', length);
   const billingType = engine === 'v2' ? 'v2_chat' : 'chat';
@@ -185,6 +189,9 @@ export async function followUp(args: {
   query: string;
   answer_length?: AnswerLength;
   expectedEngine?: ChatEngine;
+  // See startConversation.precomputedAnswer — streaming path supplies the
+  // already-streamed answer so persistence/billing is shared verbatim.
+  precomputedAnswer?: BrainAnswerResponse;
 }): Promise<PersistedMessage> {
   const length = args.answer_length ?? DEFAULT_ANSWER_LENGTH;
 
@@ -223,9 +230,9 @@ export async function followUp(args: {
     history,
     answer_length: length,
   };
-  const answer = engine === 'v2'
+  const answer = args.precomputedAnswer ?? (engine === 'v2'
     ? await brainClient.answerV2(brainReq)
-    : await brainClient.answer(brainReq);
+    : await brainClient.answer(brainReq));
 
   const cost = priceFor(engine, 'follow', length);
   const billingType = engine === 'v2' ? 'v2_chat' : 'chat';

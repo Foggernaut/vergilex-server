@@ -42,3 +42,11 @@ export class BrainSchemaError extends BrainError {
     super(502, 'BRAIN_SCHEMA_MISMATCH', 'Servis beklenmeyen bir yanıt verdi', 'Brain response did not match schema', cause);
   }
 }
+
+// Thrown when the brain lacks the streaming endpoint (404) — signals the caller
+// to fall back to the buffered answerV2 path so an un-upgraded brain still works.
+export class BrainStreamUnsupportedError extends BrainError {
+  constructor() {
+    super(501, 'BRAIN_STREAM_UNSUPPORTED', 'Akış desteklenmiyor', 'Brain has no /stream endpoint');
+  }
+}

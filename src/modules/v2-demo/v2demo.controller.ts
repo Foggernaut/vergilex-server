@@ -4,6 +4,8 @@ import { brainClient } from '../../brain/brain.client.js';
 import { supabaseAdmin } from '../../config/supabase.js';
 import { AppError, AuthError } from '../../utils/errors.js';
 import { followUp, startConversation } from '../chat/chat.service.js';
+import { streamConversation, streamFollowUp } from '../chat/chat.stream.service.js';
+import { SseWriter } from '../../utils/sse.js';
 
 const newV2ChatSchema = z.object({
   query: z.string().min(2).max(1000),
@@ -53,6 +55,59 @@ export const followUpV2Chat: RequestHandler = async (req, res, next) => {
     res.json(result);
   } catch (err) {
     next(err);
+  }
+};
+
+/**
+ * SSE streaming variant of createV2Chat. Pre-flight errors (auth, balance) are
+ * thrown before any SSE header is written → normal JSON error via next(). Once
+ * streaming starts, the service surfaces failures as SSE `error` frames.
+ */
+export const createV2ChatStream: RequestHandler = async (req, res, next) => {
+  try {
+    if (!req.user) throw new AuthError();
+    const input = newV2ChatSchema.parse(req.body);
+    const ac = new AbortController();
+    res.on('close', () => ac.abort());
+    const sse = new SseWriter(res);
+    await streamConversation(
+      {
+        userId: req.user.id,
+        query: input.query,
+        filters: input.filters,
+        answer_length: input.answer_length,
+      },
+      sse,
+      ac.signal
+    );
+  } catch (err) {
+    if (!res.headersSent) return next(err);
+    // Streaming already began — the service emitted an SSE error + closed.
+    if (!res.writableEnded) res.end();
+  }
+};
+
+export const followUpV2ChatStream: RequestHandler = async (req, res, next) => {
+  try {
+    if (!req.user) throw new AuthError();
+    const { id } = req.params as { id: string };
+    const input = v2FollowUpSchema.parse(req.body);
+    const ac = new AbortController();
+    res.on('close', () => ac.abort());
+    const sse = new SseWriter(res);
+    await streamFollowUp(
+      {
+        userId: req.user.id,
+        conversationId: id,
+        query: input.query,
+        answer_length: input.answer_length,
+      },
+      sse,
+      ac.signal
+    );
+  } catch (err) {
+    if (!res.headersSent) return next(err);
+    if (!res.writableEnded) res.end();
   }
 };
 
