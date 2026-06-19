@@ -9,6 +9,11 @@ const envSchema = z.object({
   SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_KEY: z.string().min(1),
 
+  // Mevzuat RAG Supabase (read-only) — source for the "Sistemdeki Belgeler" catalog.
+  // Separate project from the product DB above. Service-role key (bypasses RLS).
+  MEVZUAT_SUPABASE_URL: z.string().url(),
+  MEVZUAT_SUPABASE_SERVICE_KEY: z.string().min(1),
+
   BRAIN_API_URL: z.string().url(),
   BRAIN_API_KEY: z.string().min(1),
   BRAIN_TIMEOUT_MS: z.coerce.number().int().positive().default(300000),

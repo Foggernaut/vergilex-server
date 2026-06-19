@@ -14,6 +14,7 @@ import { documentsRouter } from './modules/documents/documents.routes.js';
 import { favoritesRouter } from './modules/favorites/favorites.routes.js';
 import { feedbackRouter } from './modules/feedback/feedback.routes.js';
 import { v2DemoRouter } from './modules/v2-demo/v2demo.routes.js';
+import { catalogRouter } from './modules/catalog/catalog.routes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -56,6 +57,7 @@ export function createApp(): Express {
   app.use('/api/favorites', favoritesRouter);
   app.use('/api/feedback', feedbackRouter);
   app.use('/api/v2-demo', v2DemoRouter);
+  app.use('/api/sistem-belgeler', catalogRouter);
 
   app.use((_req, res) => {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Bulunamadı' } });
