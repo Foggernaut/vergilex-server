@@ -28,6 +28,9 @@ export const BrainDocumentResultSchema = z.object({
   // Pre-formatted UI header from the brain (picks the right format per
   // source_type). Optional/nullable so older brain responses still parse.
   title: z.string().nullable().optional(),
+  // Metadata/provenance line (daire · tarih, yazar · dönem, …). Optional/nullable
+  // so older brain responses (pre-subtitle) still parse.
+  subtitle: z.string().nullable().optional(),
   excerpt: z.string(),
   relevance_score: z.number(),
   // Permissive on purpose — see KNOWN_SOURCE_TYPES above.
