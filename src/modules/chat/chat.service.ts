@@ -74,6 +74,12 @@ interface PersistedMessage {
     sources: BrainAnswerResponse['sources'];
     conflicts: BrainAnswerResponse['conflicts'];
     confidence_score: number;
+    // B12.6 trust signal — surfaced to the client on the live turn from the brain
+    // response. NOT yet persisted to the messages table (the trust_* columns need
+    // migration 013 applied first); until then these are null on history reloads.
+    trust_band?: string | null;
+    trust_score?: number | null;
+    trust_explanation?: string | null;
     not_found: boolean;
     credits_used: number;
     tokens_used: {
@@ -194,6 +200,9 @@ export async function startConversation(args: {
       conflicts: answer.conflicts,
       confidence_score: answer.confidence_score,
       not_found: answer.not_found,
+      // NOTE: trust_* columns intentionally NOT written until migration 013 is
+      // applied to the product DB. The values still reach the client via the
+      // in-memory merge on the returned message below.
       brain_request_id: answer.request_id ?? null,
       credits_used: cost,
       tokens_used: tokensUsedJsonb,
@@ -219,7 +228,14 @@ export async function startConversation(args: {
   return {
     conversationId: conv.id,
     newBalance,
-    message: assistantMsg,
+    // Merge the brain's trust signal in-memory (not persisted yet — see migration
+    // 013). The client surfaces trust_score as the user-facing % on this turn.
+    message: {
+      ...assistantMsg,
+      trust_band: answer.trust_band ?? null,
+      trust_score: answer.trust_score ?? null,
+      trust_explanation: answer.trust_explanation ?? null,
+    },
   };
 }
 
@@ -330,6 +346,9 @@ export async function followUp(args: {
       conflicts: answer.conflicts,
       confidence_score: answer.confidence_score,
       not_found: answer.not_found,
+      // NOTE: trust_* columns intentionally NOT written until migration 013 is
+      // applied to the product DB. The values still reach the client via the
+      // in-memory merge on the returned message below.
       brain_request_id: answer.request_id ?? null,
       credits_used: cost,
       tokens_used: tokensUsedJsonb,
@@ -360,7 +379,14 @@ export async function followUp(args: {
   return {
     conversationId: args.conversationId,
     newBalance,
-    message: assistantMsg,
+    // Merge the brain's trust signal in-memory (not persisted yet — see migration
+    // 013). The client surfaces trust_score as the user-facing % on this turn.
+    message: {
+      ...assistantMsg,
+      trust_band: answer.trust_band ?? null,
+      trust_score: answer.trust_score ?? null,
+      trust_explanation: answer.trust_explanation ?? null,
+    },
   };
 }
 
