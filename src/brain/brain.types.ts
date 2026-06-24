@@ -120,6 +120,13 @@ export const BrainAnswerResponseSchema = z.object({
   // B12.9: audited request id — echoed back so we can submit it to /v2/feedback.
   // null on the legacy v1 path (unaudited).
   request_id: z.string().nullable().optional(),
+  // B12.6 composite trust signal — the discriminative answer-quality score
+  // (fidelity/citations/source-tier weighted; CE is only 10%). This — not the
+  // raw CE `confidence_score` — is what the client surfaces as the user-facing %.
+  // Nullable/optional: legacy v1 path and older rows don't carry it.
+  trust_band: z.string().nullable().optional(),
+  trust_score: z.number().nullable().optional(),
+  trust_explanation: z.string().nullable().optional(),
 });
 export type BrainAnswerResponse = z.infer<typeof BrainAnswerResponseSchema>;
 
