@@ -12,9 +12,13 @@ import { getBalance } from '../credits/credits.service.js';
 import { InsufficientCreditsError, NotFoundError } from '../../utils/errors.js';
 import { logger } from '../../config/logger.js';
 import type { SseWriter } from '../../utils/sse.js';
-import { followUp, startConversation, type ChatEngine } from './chat.service.js';
+import {
+  followUp,
+  loadHistorySinceBoundary,
+  startConversation,
+  type ChatEngine,
+} from './chat.service.js';
 
-const MAX_HISTORY_TURNS = 6;
 const HEARTBEAT_MS = 10_000;
 
 /**
@@ -88,17 +92,12 @@ export async function streamFollowUp(
 
   await assertCanAfford(args.userId);
 
-  const { data: prior, error: priorError } = await supabaseAdmin
-    .from('messages')
-    .select('role, content, created_at')
-    .eq('conversation_id', args.conversationId)
-    .order('created_at', { ascending: false })
-    .limit(MAX_HISTORY_TURNS);
-  if (priorError) throw priorError;
-
-  const history: BrainHistoryItem[] = (prior ?? [])
-    .reverse()
-    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+  // History honors the persistent context boundary (takip-tespit) — same loader
+  // as the buffered path so a streamed follow-up never re-sends a topic the user
+  // already pivoted away from.
+  const history: BrainHistoryItem[] = await loadHistorySinceBoundary(
+    args.conversationId
+  );
 
   const brainReq: BrainAnswerRequest = {
     query: args.query,
