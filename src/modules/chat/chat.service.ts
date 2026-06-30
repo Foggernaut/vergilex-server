@@ -23,6 +23,44 @@ const TITLE_MAX = 80;
 export type ChatEngine = 'v1' | 'v2';
 
 /**
+ * Load the brain `history[]` for a conversation, honoring the persistent context
+ * boundary set by takip-tespit. When an earlier turn was classified as a new
+ * topic, its user message carries `context_reset=true`; history is then loaded
+ * only from the most recent such boundary onward (capped at MAX_HISTORY_TURNS),
+ * so a topic the user already pivoted away from never re-pollutes the brain.
+ * Shared by the buffered (followUp) and streaming (streamFollowUp) paths.
+ */
+export async function loadHistorySinceBoundary(
+  conversationId: string,
+  limit = MAX_HISTORY_TURNS
+): Promise<BrainHistoryItem[]> {
+  const { data: boundaryRow } = await supabaseAdmin
+    .from('messages')
+    .select('created_at')
+    .eq('conversation_id', conversationId)
+    .eq('context_reset', true)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let priorQuery = supabaseAdmin
+    .from('messages')
+    .select('role, content, created_at')
+    .eq('conversation_id', conversationId);
+  if (boundaryRow?.created_at) {
+    priorQuery = priorQuery.gte('created_at', boundaryRow.created_at);
+  }
+  const { data: prior, error: priorError } = await priorQuery
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (priorError) throw priorError;
+
+  return (prior ?? [])
+    .reverse()
+    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+}
+
+/**
  * Write the "Geçmiş" (search history) shadow row. Intentionally NON-FATAL: a
  * successful — and on V1, billed — chat must never be lost just because this
  * secondary row failed. But the failure MUST surface in the logs. Previously
@@ -272,17 +310,11 @@ export async function followUp(args: {
     throw new NotFoundError('Sohbet bulunamadı');
   }
 
-  const { data: prior, error: priorError } = await supabaseAdmin
-    .from('messages')
-    .select('role, content, created_at')
-    .eq('conversation_id', args.conversationId)
-    .order('created_at', { ascending: false })
-    .limit(MAX_HISTORY_TURNS);
-  if (priorError) throw priorError;
-
-  const history: BrainHistoryItem[] = (prior ?? [])
-    .reverse()
-    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+  // History honors the persistent context boundary (takip-tespit) — see
+  // loadHistorySinceBoundary.
+  const history: BrainHistoryItem[] = await loadHistorySinceBoundary(
+    args.conversationId
+  );
 
   const brainReq: BrainAnswerRequest = {
     query: args.query,
@@ -327,6 +359,10 @@ export async function followUp(args: {
       content: args.query,
       credits_used: 0,
       engine,
+      // takip-tespit: mark this user turn as a context boundary when the brain
+      // classified it as a new topic. Future follow-ups load history only from
+      // here onward (see the boundary lookup above).
+      context_reset: answer.context_reset === true,
     },
   ]);
 
