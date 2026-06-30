@@ -27,26 +27,50 @@ export async function submitMessageFeedback(args: {
   rating: number;
   note?: string;
 }): Promise<FeedbackResult> {
-  // Load the message + owning conversation in one shot; !inner drops rows whose
-  // conversation doesn't match, so a wrong user_id yields no row.
-  const { data: msg, error } = await supabaseAdmin
-    .from('messages')
-    .select('id, role, brain_request_id, conversations!inner(user_id, deleted_at)')
-    .eq('id', args.messageId)
-    .single();
+  // Look up the message in the chat tables first, then the Mevzuat Asistanı
+  // tables (assistant_messages / assistant_conversations). Both share the same
+  // shape, so the shared 👍/👎 component posts a messageId without knowing which
+  // feature produced it. !inner drops rows whose conversation doesn't match, so
+  // a wrong user_id yields no row.
+  type Owner = { user_id: string; deleted_at: string | null };
+  type MsgRow = { role: string; brain_request_id: string | null; owner?: Owner };
 
-  const conv = (msg as { conversations?: { user_id: string; deleted_at: string | null } } | null)
-    ?.conversations;
-  if (error || !msg || !conv || conv.user_id !== args.userId || conv.deleted_at) {
+  let table: 'messages' | 'assistant_messages' = 'messages';
+  let row: MsgRow | null = null;
+
+  {
+    const { data } = await supabaseAdmin
+      .from('messages')
+      .select('id, role, brain_request_id, conversations!inner(user_id, deleted_at)')
+      .eq('id', args.messageId)
+      .single();
+    const r = data as (MsgRow & { conversations?: Owner }) | null;
+    if (r) row = { role: r.role, brain_request_id: r.brain_request_id, owner: r.conversations };
+  }
+  if (!row) {
+    const { data } = await supabaseAdmin
+      .from('assistant_messages')
+      .select('id, role, brain_request_id, assistant_conversations!inner(user_id, deleted_at)')
+      .eq('id', args.messageId)
+      .single();
+    const r = data as (MsgRow & { assistant_conversations?: Owner }) | null;
+    if (r) {
+      row = { role: r.role, brain_request_id: r.brain_request_id, owner: r.assistant_conversations };
+      table = 'assistant_messages';
+    }
+  }
+
+  const conv = row?.owner;
+  if (!row || !conv || conv.user_id !== args.userId || conv.deleted_at) {
     throw new NotFoundError('Mesaj bulunamadı');
   }
-  if (msg.role !== 'assistant') {
+  if (row.role !== 'assistant') {
     throw new ValidationError('Yalnızca yanıtlar oylanabilir');
   }
 
   // 1) Authoritative local store — drives the thumbs UI state across reloads.
   const { error: updateError } = await supabaseAdmin
-    .from('messages')
+    .from(table)
     .update({ feedback_rating: args.rating })
     .eq('id', args.messageId);
   if (updateError) throw updateError;
@@ -54,7 +78,7 @@ export async function submitMessageFeedback(args: {
   // 2) Best-effort forward to the brain eval pipeline. Only the audited v2 path
   //    carries a brain_request_id; v1 answers simply skip the forward.
   let forwardedToBrain = false;
-  const requestId = msg.brain_request_id as string | null;
+  const requestId = row.brain_request_id;
   if (requestId) {
     try {
       const res = await brainClient.submitFeedback({

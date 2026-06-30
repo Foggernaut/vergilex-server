@@ -22,6 +22,7 @@ import {
   type BrainFindDocumentsRequest,
   type BrainFindDocumentsResponse,
   BrainFindDocumentsResponseSchema,
+  type BrainDocumentResult,
   type BrainStreamEvent,
 } from './brain.types.js';
 import { z } from 'zod';
@@ -85,7 +86,35 @@ export class BrainClient {
     req: BrainAnswerRequest,
     signal?: AbortSignal
   ): AsyncGenerator<BrainStreamEvent> {
-    const url = `${this.cfg.baseUrl.replace(/\/$/, '')}/v2/answer-questions/stream`;
+    yield* this.streamAnswer('/v2/answer-questions/stream', req, signal);
+  }
+
+  // --- Mevzuat Asistanı (Opus 4.8 agentic) — same request/response contract ---
+
+  async assistantAnswer(req: BrainAnswerRequest): Promise<BrainAnswerResponse> {
+    return this.post('/v2/assistant/answer', req, BrainAnswerResponseSchema);
+  }
+
+  /** Streaming variant of assistantAnswer. Same SSE event shape as answerV2Stream. */
+  async *assistantAnswerStream(
+    req: BrainAnswerRequest,
+    signal?: AbortSignal
+  ): AsyncGenerator<BrainStreamEvent> {
+    yield* this.streamAnswer('/v2/assistant/answer/stream', req, signal);
+  }
+
+  /**
+   * Shared SSE consumer for the brain's streaming answer endpoints. Yields
+   * parsed events (phase / answer_delta / complete / error) without buffering;
+   * `signal` aborts the upstream request on client disconnect. Throws
+   * BrainStreamUnsupportedError on 404/405 so the caller can fall back to buffered.
+   */
+  private async *streamAnswer(
+    path: string,
+    req: BrainAnswerRequest,
+    signal?: AbortSignal
+  ): AsyncGenerator<BrainStreamEvent> {
+    const url = `${this.cfg.baseUrl.replace(/\/$/, '')}${path}`;
     const started = Date.now();
     logger.info('Brain stream request →', { url });
 
@@ -161,6 +190,17 @@ export class BrainClient {
         return { type: 'phase', phase: String(obj.phase ?? '') };
       case 'answer_delta':
         return { type: 'answer_delta', text: String(obj.text ?? '') };
+      case 'layer1':
+        return { type: 'layer1', documents: (obj.documents ?? []) as BrainDocumentResult[] };
+      case 'layer2':
+        return {
+          type: 'layer2',
+          corpus: String(obj.corpus ?? ''),
+          label: String(obj.label ?? ''),
+          summary: String(obj.summary ?? ''),
+        };
+      case 'layer3_delta':
+        return { type: 'layer3_delta', text: String(obj.text ?? '') };
       case 'error':
         return {
           type: 'error',

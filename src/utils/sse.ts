@@ -18,6 +18,9 @@ export class SseWriter {
     // Disable proxy buffering (nginx/Railway edge) so events flush immediately.
     this.res.setHeader('X-Accel-Buffering', 'no');
     this.res.flushHeaders?.();
+    // Disable Nagle so each small SSE frame is sent on the wire immediately
+    // instead of being coalesced (the #1 cause of "everything arrives at once").
+    this.res.socket?.setNoDelay(true);
   }
 
   event(event: string, data: unknown): void {
@@ -26,11 +29,14 @@ export class SseWriter {
     // data may contain newlines (e.g. an answer chunk) — split into data: lines.
     const lines = payload.split('\n').map((l) => `data: ${l}`).join('\n');
     this.res.write(`event: ${event}\n${lines}\n\n`);
+    // Force an explicit flush when a compression layer is present (no-op otherwise).
+    (this.res as unknown as { flush?: () => void }).flush?.();
   }
 
   ping(): void {
     if (this.closed || this.res.writableEnded) return;
     this.res.write(': ping\n\n');
+    (this.res as unknown as { flush?: () => void }).flush?.();
   }
 
   close(): void {
