@@ -139,6 +139,12 @@ export const BrainAnswerResponseSchema = z.object({
   trust_band: z.string().nullable().optional(),
   trust_score: z.number().nullable().optional(),
   trust_explanation: z.string().nullable().optional(),
+  // takip-tespit: true iff the brain classified THIS turn as a new topic (not a
+  // continuation) and ignored prior history. We persist this as a context
+  // boundary on the new user message so future turns load history only from
+  // here onward. Optional/nullable: legacy v1 path doesn't carry it.
+  context_reset: z.boolean().nullable().optional(),
+  context_mode: z.string().nullable().optional(), // followup | new_context
 });
 export type BrainAnswerResponse = z.infer<typeof BrainAnswerResponseSchema>;
 
