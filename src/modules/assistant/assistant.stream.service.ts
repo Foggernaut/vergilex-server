@@ -32,7 +32,7 @@ export async function streamAssistantChat(
   args: {
     userId: string;
     query: string;
-    filters?: { law_id?: string | null };
+    filters?: { law_id?: string | null; corpora?: string[] };
     answer_length?: AnswerLength;
   },
   sse: SseWriter,

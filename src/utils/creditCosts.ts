@@ -9,7 +9,7 @@ export const CREDIT_COSTS = {
   // Mevzuat Asistanı (Opus 4.8, 3-layer): Sonnet triage + Opus gather loop +
   // 5–7 parallel Opus per-corpus summaries + a streamed Opus essay + güvence.
   // Many Opus calls per request → priced well above v1/v2.
-  assistant: { short: 25, medium: 40, long: 60 },
+  assistant: { short: 20, medium: 20, long: 20 },
   assistant_follow_up: { short: 15, medium: 25, long: 40 },
 } as const;
 

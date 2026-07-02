@@ -86,7 +86,7 @@ function shapeMessage(
 export async function startAssistantChat(args: {
   userId: string;
   query: string;
-  filters?: { law_id?: string | null };
+  filters?: { law_id?: string | null; corpora?: string[] };
   answer_length?: AnswerLength;
   // Streaming path supplies the already-streamed answer so persistence/billing
   // is shared verbatim with the buffered path.

@@ -4,6 +4,7 @@ import { aiLimiter } from '../../middleware/rateLimit.js';
 import {
   createAssistantChat,
   createAssistantChatStream,
+  createAssistantChatStreamGET,
   deleteAssistant,
   followUpAssistantChat,
   followUpAssistantChatStream,
@@ -12,6 +13,10 @@ import {
 } from './assistant.controller.js';
 
 export const assistantRouter = Router();
+
+// EventSource SSE endpoint — MUST be before requireAuth (EventSource can't send
+// the Authorization header; it authenticates via ?access_token in the handler).
+assistantRouter.get('/conversations/stream', createAssistantChatStreamGET);
 
 assistantRouter.use(requireAuth);
 

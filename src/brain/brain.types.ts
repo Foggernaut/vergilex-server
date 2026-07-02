@@ -62,7 +62,11 @@ export const AnswerLengthSchema = z.enum(['short', 'medium', 'long']);
 export type AnswerLength = z.infer<typeof AnswerLengthSchema>;
 
 export const BrainFiltersSchema = z
-  .object({ law_id: z.string().nullable().optional() })
+  .object({
+    law_id: z.string().nullable().optional(),
+    // 3-layer assistant corpus selection (corpus keys). Omitted/null = all corpora.
+    corpora: z.array(z.string()).nullable().optional(),
+  })
   .optional();
 
 export const BrainFindDocumentsRequestSchema = z.object({
