@@ -6,6 +6,11 @@ export const CREDIT_COSTS = {
   doc_finder: 2,
   // V2 demo: flat 5 KR/soru (both new conversation and follow-up).
   v2_chat: 5,
+  // Mevzuat Asistanı (Opus 4.8, 3-layer): Sonnet triage + Opus gather loop +
+  // 5–7 parallel Opus per-corpus summaries + a streamed Opus essay + güvence.
+  // Many Opus calls per request → priced well above v1/v2.
+  assistant: { short: 20, medium: 20, long: 20 },
+  assistant_follow_up: { short: 15, medium: 25, long: 40 },
 } as const;
 
 export const DEFAULT_ANSWER_LENGTH: AnswerLength = 'long';
@@ -20,6 +25,14 @@ export function followUpCost(length: AnswerLength): number {
 
 export function v2ChatCost(): number {
   return CREDIT_COSTS.v2_chat;
+}
+
+export function assistantChatCost(length: AnswerLength): number {
+  return CREDIT_COSTS.assistant[length];
+}
+
+export function assistantFollowUpCost(length: AnswerLength): number {
+  return CREDIT_COSTS.assistant_follow_up[length];
 }
 
 export type { AnswerLength };

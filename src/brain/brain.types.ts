@@ -62,7 +62,11 @@ export const AnswerLengthSchema = z.enum(['short', 'medium', 'long']);
 export type AnswerLength = z.infer<typeof AnswerLengthSchema>;
 
 export const BrainFiltersSchema = z
-  .object({ law_id: z.string().nullable().optional() })
+  .object({
+    law_id: z.string().nullable().optional(),
+    // 3-layer assistant corpus selection (corpus keys). Omitted/null = all corpora.
+    corpora: z.array(z.string()).nullable().optional(),
+  })
   .optional();
 
 export const BrainFindDocumentsRequestSchema = z.object({
@@ -105,10 +109,22 @@ export const BrainConflictSchema = z.object({
 });
 export type BrainConflict = z.infer<typeof BrainConflictSchema>;
 
+// Katman 2 — per-corpus generalization ("kanunlarda/Danıştay'da ne diyor").
+export const BrainCorpusSummarySchema = z.object({
+  corpus_type: z.string(),
+  label: z.string(),
+  summary: z.string(),
+  chunk_count: z.number().int(),
+  authority_level: z.number().int().default(0),
+});
+export type BrainCorpusSummary = z.infer<typeof BrainCorpusSummarySchema>;
+
 export const BrainAnswerResponseSchema = z.object({
   answer: z.string(),
   sources: z.array(BrainDocumentResultSchema),
   conflicts: z.array(BrainConflictSchema),
+  // Katman 2 — optional/defaulted so v1/legacy responses still parse.
+  corpus_summaries: z.array(BrainCorpusSummarySchema).default([]),
   confidence_score: z.number(),
   tokens_used: z.object({
     prompt: z.number().int(),
@@ -143,6 +159,10 @@ export type BrainAnswerResponse = z.infer<typeof BrainAnswerResponseSchema>;
 export type BrainStreamEvent =
   | { type: 'phase'; phase: string }
   | { type: 'answer_delta'; text: string }
+  // 3-layer assistant: Katman 1 docs / Katman 2 per-corpus summary / Katman 3 essay deltas.
+  | { type: 'layer1'; documents: BrainDocumentResult[] }
+  | { type: 'layer2'; corpus: string; label: string; summary: string }
+  | { type: 'layer3_delta'; text: string }
   | { type: 'complete'; response: BrainAnswerResponse }
   | { type: 'error'; code: string; message: string };
 
