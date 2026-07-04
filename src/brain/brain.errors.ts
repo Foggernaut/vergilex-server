@@ -43,6 +43,14 @@ export class BrainSchemaError extends BrainError {
   }
 }
 
+// Brain says the requested resource does not exist (e.g. full text of an
+// unknown chunk). Maps to a plain 404 in the error envelope.
+export class BrainNotFoundError extends BrainError {
+  constructor(details?: unknown) {
+    super(404, 'BRAIN_NOT_FOUND', 'Kaynak bulunamadı', 'Brain resource not found', details);
+  }
+}
+
 // Thrown when the brain lacks the streaming endpoint (404) — signals the caller
 // to fall back to the buffered answerV2 path so an un-upgraded brain still works.
 export class BrainStreamUnsupportedError extends BrainError {

@@ -4,6 +4,7 @@ import { logger } from '../config/logger.js';
 import {
   BrainAuthError,
   BrainError,
+  BrainNotFoundError,
   BrainSchemaError,
   BrainStreamUnsupportedError,
   BrainTimeoutError,
@@ -22,6 +23,8 @@ import {
   type BrainFindDocumentsRequest,
   type BrainFindDocumentsResponse,
   BrainFindDocumentsResponseSchema,
+  type BrainFullTextResponse,
+  BrainFullTextResponseSchema,
   type BrainDocumentResult,
   type BrainStreamEvent,
 } from './brain.types.js';
@@ -235,6 +238,15 @@ export class BrainClient {
     return this.postMultipart('/v2/analyze-document', input, BrainAnalyzeDocumentResponseSchema);
   }
 
+  /** Kaynak modali "Tam metni görüntüle" — GET /v2/document. */
+  async getDocumentFullText(params: {
+    source_type: string;
+    chunk_id: string;
+    parent_id?: string;
+  }): Promise<BrainFullTextResponse> {
+    return this.get('/v2/document', params, BrainFullTextResponseSchema);
+  }
+
   async health(): Promise<{ status: string }> {
     const url = `${this.cfg.baseUrl.replace(/\/$/, '')}/health`;
     const ctrl = new AbortController();
@@ -276,6 +288,86 @@ export class BrainClient {
     this.recordFailure();
     if (lastError instanceof BrainError) throw lastError;
     throw new BrainUnavailableError(lastError);
+  }
+
+  /** Generic authed GET with query params — same breaker/error mapping as post(),
+   * plus 404 → BrainNotFoundError (a missing document is not a brain outage). */
+  private async get<S extends z.ZodTypeAny>(
+    path: string,
+    query: Record<string, string | undefined>,
+    responseSchema: S
+  ): Promise<z.output<S>> {
+    this.checkBreaker();
+    try {
+      const result = await this.doGetRequest(path, query, responseSchema);
+      this.recordSuccess();
+      return result;
+    } catch (err) {
+      // Not-found is a normal outcome, not a brain failure — keep breaker closed.
+      if (err instanceof BrainNotFoundError) throw err;
+      this.recordFailure();
+      if (err instanceof BrainError) throw err;
+      throw new BrainUnavailableError(err);
+    }
+  }
+
+  private async doGetRequest<S extends z.ZodTypeAny>(
+    path: string,
+    query: Record<string, string | undefined>,
+    responseSchema: S
+  ): Promise<z.output<S>> {
+    const qs = new URLSearchParams(
+      Object.entries(query).filter(([, v]) => v != null) as [string, string][]
+    ).toString();
+    const url = `${this.cfg.baseUrl.replace(/\/$/, '')}${path}${qs ? `?${qs}` : ''}`;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), this.cfg.timeoutMs);
+    const started = Date.now();
+    logger.info('Brain request →', { url: `${this.cfg.baseUrl}${path}`, method: 'GET' });
+
+    let res;
+    try {
+      res = await request(url, {
+        method: 'GET',
+        headers: { 'x-api-key': this.cfg.apiKey },
+        signal: ctrl.signal,
+      });
+    } catch (err: unknown) {
+      const error = err as { name?: string };
+      if (error?.name === 'AbortError') throw new BrainTimeoutError(err);
+      throw new BrainUnavailableError(err);
+    } finally {
+      clearTimeout(t);
+    }
+
+    const status = res.statusCode;
+    logger.info('Brain response ←', { path, status, durationMs: Date.now() - started });
+
+    if (status === 403 || status === 401) throw new BrainAuthError();
+    if (status === 404) throw new BrainNotFoundError();
+    if (status === 400 || status === 422) {
+      let details: unknown;
+      try {
+        details = await res.body.json();
+      } catch {
+        /* noop */
+      }
+      throw new BrainValidationError(details);
+    }
+    if (status < 200 || status >= 300) throw new BrainUnavailableError({ status });
+
+    let raw: unknown;
+    try {
+      raw = await res.body.json();
+    } catch (err) {
+      throw new BrainSchemaError(err);
+    }
+    const parsed = responseSchema.safeParse(raw);
+    if (!parsed.success) {
+      logger.error('Brain response schema mismatch', { path, issues: parsed.error.flatten() });
+      throw new BrainSchemaError(parsed.error);
+    }
+    return parsed.data;
   }
 
   private async doRequest<S extends z.ZodTypeAny>(
