@@ -16,6 +16,7 @@ import { feedbackRouter } from './modules/feedback/feedback.routes.js';
 import { v2DemoRouter } from './modules/v2-demo/v2demo.routes.js';
 import { assistantRouter } from './modules/assistant/assistant.routes.js';
 import { catalogRouter } from './modules/catalog/catalog.routes.js';
+import { sourceTextRouter } from './modules/source-text/sourceText.routes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -60,6 +61,7 @@ export function createApp(): Express {
   app.use('/api/v2-demo', v2DemoRouter);
   app.use('/api/assistant', assistantRouter);
   app.use('/api/sistem-belgeler', catalogRouter);
+  app.use('/api/tam-metin', sourceTextRouter);
 
   app.use((_req, res) => {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Bulunamadı' } });

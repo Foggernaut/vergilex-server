@@ -35,6 +35,10 @@ export const BrainDocumentResultSchema = z.object({
   relevance_score: z.number(),
   // Permissive on purpose — see KNOWN_SOURCE_TYPES above.
   source_type: z.string(),
+  // Parent-document id (karar_id / ozelge_id / makale_id / article_id) for the
+  // full-text lookup. Optional/nullable: older brain responses don't carry it,
+  // and without this key zod would silently strip it before persistence.
+  source_id: z.string().nullable().optional(),
   law_references: z.array(z.string()),
 });
 export type BrainDocumentResult = z.infer<typeof BrainDocumentResultSchema>;
@@ -165,6 +169,16 @@ export type BrainStreamEvent =
   | { type: 'layer3_delta'; text: string }
   | { type: 'complete'; response: BrainAnswerResponse }
   | { type: 'error'; code: string; message: string };
+
+// --- v2 document full text (kaynak modali "Tam metni görüntüle") ---
+
+export const BrainFullTextResponseSchema = z.object({
+  source_type: z.string(),
+  parent_id: z.string().nullable().optional(),
+  full_text: z.string(),
+  char_count: z.number().int().optional(),
+});
+export type BrainFullTextResponse = z.infer<typeof BrainFullTextResponseSchema>;
 
 // --- v2 feedback (👍/👎) ---
 
