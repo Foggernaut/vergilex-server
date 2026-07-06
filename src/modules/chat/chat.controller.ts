@@ -47,7 +47,10 @@ export const followUpChat: RequestHandler = async (req, res, next) => {
 export const listChats: RequestHandler = async (req, res, next) => {
   try {
     if (!req.user) throw new AuthError();
-    const items = await listConversations(req.user.id);
+    // Optional ?limit for the Geçmiş page (paginated conversation history);
+    // the sidebar calls without it and keeps the 50-row default. Capped at 200.
+    const limit = Math.min(Number(req.query.limit ?? 50) || 50, 200);
+    const items = await listConversations(req.user.id, limit);
     res.json({ conversations: items });
   } catch (err) {
     next(err);

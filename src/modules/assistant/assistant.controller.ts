@@ -150,7 +150,10 @@ export const followUpAssistantChatStream: RequestHandler = async (req, res, next
 export const listAssistant: RequestHandler = async (req, res, next) => {
   try {
     if (!req.user) throw new AuthError();
-    const conversations = await listAssistantConversations(req.user.id);
+    // Optional ?limit for the Geçmiş page (paginated conversation history);
+    // the sidebar calls without it and keeps the 50-row default. Capped at 200.
+    const limit = Math.min(Number(req.query.limit ?? 50) || 50, 200);
+    const conversations = await listAssistantConversations(req.user.id, limit);
     res.json({ conversations });
   } catch (err) {
     next(err);
