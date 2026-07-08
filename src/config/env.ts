@@ -16,7 +16,14 @@ const envSchema = z.object({
 
   BRAIN_API_URL: z.string().url(),
   BRAIN_API_KEY: z.string().min(1),
-  BRAIN_TIMEOUT_MS: z.coerce.number().int().positive().default(300000),
+  // Brain answers are slow: p50 ~90s, p95 ~275s (agent path). The old 300000
+  // default sat AT the p95 with zero headroom, and it must clear BOTH the
+  // brain's own processing time AND this server's pre-call work (auth + balance
+  // read). Raised to 420s (7 min) so a legitimately slow buffered answer isn't
+  // killed mid-flight. NOTE: undici's own headersTimeout/bodyTimeout (set in
+  // server.ts) and Node's server.requestTimeout must clear this too, else they
+  // cut the socket BELOW this budget. Keep all three aligned above ~300s.
+  BRAIN_TIMEOUT_MS: z.coerce.number().int().positive().default(420000),
 
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
 
