@@ -158,8 +158,9 @@ export type BrainAnswerResponse = z.infer<typeof BrainAnswerResponseSchema>;
 
 // --- v2 streaming (SSE) ---
 // Parsed events from POST /v2/answer-questions/stream. `phase` is the masked
-// coarse pipeline phase; `answer_delta` are typewriter chunks of the validated
-// answer; `complete` carries the authoritative full response we persist.
+// coarse pipeline phase; `answer_delta` are LIVE pre-gate synthesis tokens (draft
+// text the client holds citations on until validation); `complete` carries the
+// authoritative, VALIDATED full response we persist and reveal as final.
 export type BrainStreamEvent =
   | { type: 'phase'; phase: string }
   | { type: 'answer_delta'; text: string }
