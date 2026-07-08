@@ -33,9 +33,11 @@ const server = app.listen(env.PORT, () => {
 // ── Inbound (Node http.Server) timeout headroom ──────────────────────────────
 // The client/edge connection stays open for the entire answer — a buffered POST
 // (up to ~275s) or a long-lived SSE stream. Node's default requestTimeout of
-// 300_000ms would abort exactly those legitimate long requests. Disable the
-// request cap and keep the socket warm; headersTimeout stays > keepAliveTimeout.
-server.requestTimeout = 0;
+// 300_000ms would abort exactly those legitimate long requests. Raise it to a
+// FINITE value above the brain budget (not 0/disabled) so it follows
+// BRAIN_TIMEOUT_MS and still caps a genuinely stuck/slow client instead of
+// letting it hold a connection forever. headersTimeout stays > keepAliveTimeout.
+server.requestTimeout = env.BRAIN_TIMEOUT_MS + 60_000; // brain budget + margin
 server.keepAliveTimeout = 65_000;
 server.headersTimeout = 70_000;
 
