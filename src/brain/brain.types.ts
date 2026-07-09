@@ -90,6 +90,59 @@ export const BrainFindDocumentsResponseSchema = z.object({
 });
 export type BrainFindDocumentsResponse = z.infer<typeof BrainFindDocumentsResponseSchema>;
 
+// --- Belge Bul advanced search (POST /browse-documents) ---
+// Deep per-corpus recall, parent-deduped. Optional layers: C) LLM query parse,
+// B) facet filters, A) hybrid + cross-encoder rerank. Echoes `applied` (the
+// effective intent) so the UI can show "understood as …" and let users edit it.
+export const BrainBrowseFiltersSchema = z.object({
+  corpora: z.array(z.string()).nullable().optional(),
+  law_id: z.string().nullable().optional(),
+  madde_no: z.string().nullable().optional(),
+  daire: z.string().nullable().optional(),
+  date_from: z.string().nullable().optional(),
+  date_to: z.string().nullable().optional(),
+  madde_tipi: z.string().nullable().optional(),
+  exclude_mulga: z.boolean().optional(),
+});
+export type BrainBrowseFilters = z.infer<typeof BrainBrowseFiltersSchema>;
+
+export const BrainBrowseDocumentsRequestSchema = z.object({
+  query: z.string().min(2).max(1000),
+  filters: BrainBrowseFiltersSchema.optional(),
+  // Candidate chunks pulled per corpus BEFORE parent-dedupe (1..200).
+  per_corpus: z.number().int().min(1).max(200).optional(),
+  smart: z.boolean().optional(),   // C: LLM query parse
+  rerank: z.boolean().optional(),  // A: cross-encoder rerank
+});
+export type BrainBrowseDocumentsRequest = z.infer<typeof BrainBrowseDocumentsRequestSchema>;
+
+// Effective intent echoed back (parsed + user-overridden filters).
+export const BrainBrowseAppliedSchema = z.object({
+  smart: z.boolean(),
+  reranked: z.boolean(),
+  semantic_query: z.string(),
+  keywords: z.array(z.string()).default([]),
+  corpora: z.array(z.string()).nullable().optional(),
+  law_id: z.string().nullable().optional(),
+  madde_no: z.string().nullable().optional(),
+  daire: z.string().nullable().optional(),
+  date_from: z.string().nullable().optional(),
+  date_to: z.string().nullable().optional(),
+  madde_tipi: z.string().nullable().optional(),
+  exclude_mulga: z.boolean().default(true),
+});
+export type BrainBrowseApplied = z.infer<typeof BrainBrowseAppliedSchema>;
+
+export const BrainBrowseDocumentsResponseSchema = z.object({
+  documents: z.array(BrainDocumentResultSchema),
+  total_found: z.number().int(),
+  per_corpus_counts: z.record(z.string(), z.number().int()).default({}),
+  search_time_ms: z.number().int(),
+  applied: BrainBrowseAppliedSchema,
+  cost: BrainCostSchema.default(EMPTY_COST),
+});
+export type BrainBrowseDocumentsResponse = z.infer<typeof BrainBrowseDocumentsResponseSchema>;
+
 export const BrainHistoryItemSchema = z.object({
   role: z.enum(['user', 'assistant']),
   content: z.string(),
