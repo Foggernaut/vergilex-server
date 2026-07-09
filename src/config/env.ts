@@ -27,6 +27,13 @@ const envSchema = z.object({
 
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
 
+  // E-posta gönderimi (Resend) — cevabı kaynakçasıyla PDF eki olarak kullanıcının
+  // kendi adresine yollamak için. MAIL_FROM örn: "Vergilex <cevap@mail.vergilex.app>".
+  // ŞİMDİLİK OPSİYONEL: ikisi de set edilene kadar e-posta özelliği "yakında"
+  // durumundadır (endpoint 503 döner), server yine de açılır.
+  RESEND_API_KEY: z.string().min(1).optional(),
+  MAIL_FROM: z.string().min(1).optional(),
+
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
 

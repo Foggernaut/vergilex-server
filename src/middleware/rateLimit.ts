@@ -18,3 +18,13 @@ export const aiLimiter = rateLimit({
   keyGenerator: (req) => req.user?.id ?? req.ip ?? 'anon',
   message: { error: { code: 'RATE_LIMITED', message: 'AI istek limiti aşıldı' } },
 });
+
+// E-posta gönderimi — kötüye kullanıma karşı kullanıcı başına saatte 10 istek.
+export const mailLimiter = rateLimit({
+  windowMs: 60 * 60_000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id ?? req.ip ?? 'anon',
+  message: { error: { code: 'RATE_LIMITED', message: 'E-posta gönderim limiti aşıldı, lütfen sonra tekrar deneyin' } },
+});
