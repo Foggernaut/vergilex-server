@@ -23,6 +23,9 @@ import {
   type BrainFindDocumentsRequest,
   type BrainFindDocumentsResponse,
   BrainFindDocumentsResponseSchema,
+  type BrainBrowseDocumentsRequest,
+  type BrainBrowseDocumentsResponse,
+  BrainBrowseDocumentsResponseSchema,
   type BrainFullTextResponse,
   BrainFullTextResponseSchema,
   type BrainDocumentResult,
@@ -58,6 +61,11 @@ export class BrainClient {
 
   async findDocuments(req: BrainFindDocumentsRequest): Promise<BrainFindDocumentsResponse> {
     return this.post('/find-documents', req, BrainFindDocumentsResponseSchema);
+  }
+
+  // Belge Bul advanced search: deep per-corpus recall, parent-deduped, fast (no LLM).
+  async browseDocuments(req: BrainBrowseDocumentsRequest): Promise<BrainBrowseDocumentsResponse> {
+    return this.post('/browse-documents', req, BrainBrowseDocumentsResponseSchema);
   }
 
   async answer(req: BrainAnswerRequest): Promise<BrainAnswerResponse> {
