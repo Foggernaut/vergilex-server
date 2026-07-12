@@ -29,6 +29,7 @@ export const CATEGORIES: readonly CatalogCategory[] = [
   { key: 'kanunlar',         view: 'catalog_kanunlar',         label: 'Kanunlar',                    orderBy: 'title', ascending: true, dedupe: true },
   { key: 'ozelgeler',        view: 'catalog_ozelgeler',        label: 'Özelgeler',                   orderBy: 'title', ascending: true },
   { key: 'makaleler',        view: 'catalog_makaleler',        label: 'Makaleler',                   orderBy: 'title', ascending: true },
+  { key: 'doktrin',          view: 'catalog_doktrin',          label: 'Doktrin',                     orderBy: 'title', ascending: true },
   { key: 'danistay',         view: 'catalog_danistay',         label: 'Danıştay Kararları',          orderBy: 'meta2', ascending: false }, // meta2 = tarih
   { key: 'soru_cevap',       view: 'catalog_soru_cevap',       label: 'Soru-Cevap',                  orderBy: 'title', ascending: true },
   { key: 'mali_ansiklopedi', view: 'catalog_mali_ansiklopedi', label: 'Mali Ansiklopedi',            orderBy: 'title', ascending: true },
