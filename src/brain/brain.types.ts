@@ -14,6 +14,7 @@ export const KNOWN_SOURCE_TYPES = [
   'soru_cevap',
   'ansiklopedi',
   'makale',
+  'doktrin',
   'bdk',
   'danistay_karar',
 ] as const;
