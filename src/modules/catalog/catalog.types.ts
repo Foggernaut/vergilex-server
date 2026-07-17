@@ -34,6 +34,7 @@ export const CATEGORIES: readonly CatalogCategory[] = [
   { key: 'soru_cevap',       view: 'catalog_soru_cevap',       label: 'Soru-Cevap',                  orderBy: 'title', ascending: true },
   { key: 'mali_ansiklopedi', view: 'catalog_mali_ansiklopedi', label: 'Mali Ansiklopedi',            orderBy: 'title', ascending: true },
   { key: 'bdk',              view: 'catalog_bdk',              label: 'Beyanname Düzenleme Kılavuzu', orderBy: 'title', ascending: true },
+  { key: 'gib_kaynak',       view: 'catalog_gib_kaynak',       label: 'GİB Kaynakları',              orderBy: 'title', ascending: true },
 ] as const;
 
 export const CATEGORY_BY_KEY = new Map(CATEGORIES.map((c) => [c.key, c]));

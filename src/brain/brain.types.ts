@@ -17,6 +17,7 @@ export const KNOWN_SOURCE_TYPES = [
   'doktrin',
   'bdk',
   'danistay_karar',
+  'gib_kaynak',
 ] as const;
 export type BrainSourceType = (typeof KNOWN_SOURCE_TYPES)[number];
 
@@ -41,6 +42,9 @@ export const BrainDocumentResultSchema = z.object({
   // and without this key zod would silently strip it before persistence.
   source_id: z.string().nullable().optional(),
   law_references: z.array(z.string()),
+  // Kaynağın orijinal dili ('en'/'tr'; şimdilik yalnız iham_karar doldurur).
+  // Anahtar şemada olmazsa zod alanı sessizce eler — UI dil rozeti kaybolur.
+  dil: z.string().nullable().optional(),
 });
 export type BrainDocumentResult = z.infer<typeof BrainDocumentResultSchema>;
 
@@ -232,6 +236,9 @@ export const BrainFullTextResponseSchema = z.object({
   parent_id: z.string().nullable().optional(),
   full_text: z.string(),
   char_count: z.number().int().optional(),
+  // İHAM: EN kararın TR özet kardeşi + kaynak dili — modal sekmeleri için.
+  ozet_tr: z.string().nullable().optional(),
+  dil: z.string().nullable().optional(),
 });
 export type BrainFullTextResponse = z.infer<typeof BrainFullTextResponseSchema>;
 
