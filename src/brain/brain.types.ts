@@ -45,6 +45,21 @@ export const BrainDocumentResultSchema = z.object({
   // Kaynağın orijinal dili ('en'/'tr'; şimdilik yalnız iham_karar doldurur).
   // Anahtar şemada olmazsa zod alanı sessizce eler — UI dil rozeti kaybolur.
   dil: z.string().nullable().optional(),
+  // Alaka triyajı (brain GNDO §4.4) — "dogrudan" | "cevresel". Anahtar şemada
+  // olmazsa zod alanı sessizce eler ve JSONB persist'e hiç yazılmaz — ÇEVRESEL
+  // rozeti kalıcı mesajlarda kaybolur. Gerekçe UI tooltip'inde gösterilir.
+  relevance_category: z.string().nullable().optional(),
+  relevance_rationale: z.string().nullable().optional(),
+  // Künye doğrulama alanları (brain DocumentResult "VERIFICATION" bloğu):
+  // source_ref = insan-okur künye ("Danıştay 9.D. E:2022/4647 K:2023/459 (2023)"),
+  // source_url = resmî kaynak linki, dogrulanmali = zayıf-künye bayrağı (UI rozet).
+  // Anahtar şemada olmazsa zod sessizce eler → persist edilen her mesaj künyeyi
+  // KALICI olarak kaybeder (relevance_category ile aynı tuzak). `full_text`
+  // BİLEREK dışarıda: kaynak başına tam metin payload/JSONB maliyetini şişirir;
+  // tam metni /v2/document endpoint'i talep üzerine verir.
+  source_ref: z.string().nullable().optional(),
+  source_url: z.string().nullable().optional(),
+  dogrulanmali: z.boolean().nullable().optional(),
 });
 export type BrainDocumentResult = z.infer<typeof BrainDocumentResultSchema>;
 

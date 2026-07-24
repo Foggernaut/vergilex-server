@@ -47,6 +47,61 @@ describe('BrainDocumentResultSchema', () => {
     const parsed = BrainDocumentResultSchema.safeParse({ ...legacy, source_type: 'chunk' });
     expect(parsed.success).toBe(true);
   });
+
+  // Alaka triyajı: alanlar şemada OLMALI — zod bilinmeyen anahtarı sessizce
+  // eler ve rozet kalıcı mesajlarda kaybolurdu. Retention'ı pinliyoruz.
+  it('retains relevance_category/relevance_rationale through parse', () => {
+    const parsed = BrainDocumentResultSchema.parse({
+      ...baseDoc,
+      relevance_category: 'cevresel',
+      relevance_rationale: 'kıyasen değerli — sermaye tamamlama fonu analojisi',
+    });
+    expect(parsed.relevance_category).toBe('cevresel');
+    expect(parsed.relevance_rationale).toContain('kıyasen');
+  });
+
+  it('parses triage-less legacy sources (fields optional)', () => {
+    const parsed = BrainDocumentResultSchema.parse(baseDoc);
+    expect(parsed.relevance_category).toBeUndefined();
+  });
+
+  // FastAPI, None'ı açık `null` olarak serileştirir — triyaj kapalı/etiketsiz
+  // kaynakların GERÇEK wire şekli budur. `.nullable()` yanlışlıkla düşürülürse
+  // prod payload'ları reddedilir; bu test onu pinler.
+  it('accepts explicit nulls for triage fields (FastAPI wire shape)', () => {
+    const parsed = BrainDocumentResultSchema.parse({
+      ...baseDoc,
+      relevance_category: null,
+      relevance_rationale: null,
+    });
+    expect(parsed.relevance_category).toBeNull();
+  });
+
+  // Künye doğrulama alanları: retention (strip edilirse persist edilen mesajlar
+  // künyeyi kalıcı kaybeder) + legacy omission + explicit null.
+  it('retains source_ref/source_url/dogrulanmali through parse', () => {
+    const parsed = BrainDocumentResultSchema.parse({
+      ...baseDoc,
+      source_ref: 'Danıştay 9.D. E:2022/4647 K:2023/459 (2023)',
+      source_url: 'https://ornek.resmi.kaynak/karar/459',
+      dogrulanmali: true,
+    });
+    expect(parsed.source_ref).toContain('E:2022/4647');
+    expect(parsed.source_url).toContain('https://');
+    expect(parsed.dogrulanmali).toBe(true);
+  });
+
+  it('parses sources without künye fields (legacy) and with explicit nulls', () => {
+    expect(BrainDocumentResultSchema.safeParse(baseDoc).success).toBe(true);
+    const parsed = BrainDocumentResultSchema.parse({
+      ...baseDoc,
+      source_ref: null,
+      source_url: null,
+      dogrulanmali: null,
+    });
+    expect(parsed.source_ref).toBeNull();
+    expect(parsed.dogrulanmali).toBeNull();
+  });
 });
 
 describe('response schemas carry new source types', () => {
