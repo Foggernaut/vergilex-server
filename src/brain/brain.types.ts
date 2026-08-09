@@ -150,6 +150,13 @@ export const BrainBrowseAppliedSchema = z.object({
   date_to: z.string().nullable().optional(),
   madde_tipi: z.string().nullable().optional(),
   exclude_mulga: z.boolean().default(true),
+  // Künye modu (E:/K: tam eşleşme): sorgu konu değil karar künyesi listesiyse
+  // brain anlamsal aramayı atlar. `kunye_bulunamayan` UI'da AÇIKÇA gösterilir —
+  // alakasız sonuç göstermek "bulunamadı" demekten kötüdür. Opsiyonel: künye
+  // modundan önceki brain sürümleri bu alanları göndermez.
+  kunye_mode: z.boolean().optional(),
+  kunye_bulunan: z.array(z.string()).optional(),
+  kunye_bulunamayan: z.array(z.string()).optional(),
 });
 export type BrainBrowseApplied = z.infer<typeof BrainBrowseAppliedSchema>;
 
