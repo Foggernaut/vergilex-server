@@ -220,6 +220,26 @@ export const BrainAnswerResponseSchema = z.object({
   trust_band: z.string().nullable().optional(),
   trust_score: z.number().nullable().optional(),
   trust_explanation: z.string().nullable().optional(),
+  // Pozisyon gücü — a SEPARATE axis from trust. trust = "how well grounded is
+  // this answer in its sources"; position = "how defensible is this position
+  // against the idare / yargı" (source authority + conflicts). A well-grounded
+  // answer can still be an aggressive position, so the client shows both.
+  // `position_level` is deliberately a bare string, not an enum: the brain owns
+  // that vocabulary (güçlü | savunulabilir | agresif | ihtilaflı) and adding a
+  // grade there must never make the whole response fail to parse.
+  position_level: z.string().nullable().optional(),
+  position_score: z.number().nullable().optional(),
+  position_rationale: z.string().nullable().optional(),
+  // Dereceli teslim: a blocking güvence gate stripped the unverifiable sentences
+  // instead of dropping the whole answer. `degradation_note` is ALREADY appended
+  // to `answer` as markdown; these fields let the client also render a banner.
+  degraded: z.boolean().nullable().optional(),
+  degradation_reason: z.string().nullable().optional(),
+  degradation_note: z.string().nullable().optional(),
+  // Machine-readable form of the answer's EKSİK BİLGİ section: dispositive party
+  // facts the question left unspecified, which the client offers as one-tap
+  // follow-up questions. Defaulted so legacy/v1 responses still parse.
+  clarifying_questions: z.array(z.string()).default([]),
   // takip-tespit: true iff the brain classified THIS turn as a new topic (not a
   // continuation) and ignored prior history. We persist this as a context
   // boundary on the new user message so future turns load history only from
