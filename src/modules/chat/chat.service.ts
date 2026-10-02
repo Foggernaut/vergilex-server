@@ -15,6 +15,11 @@ import {
 } from '../../utils/creditCosts.js';
 import { deductCredits } from '../credits/credits.service.js';
 import { NotFoundError } from '../../utils/errors.js';
+import {
+  answerSignalFields,
+  insertWithSignals,
+  selectWithSignals,
+} from '../../utils/answerSignals.js';
 import { logger } from '../../config/logger.js';
 
 const MAX_HISTORY_TURNS = 6;
@@ -112,12 +117,19 @@ interface PersistedMessage {
     sources: BrainAnswerResponse['sources'];
     conflicts: BrainAnswerResponse['conflicts'];
     confidence_score: number;
-    // B12.6 trust signal — surfaced to the client on the live turn from the brain
-    // response. NOT yet persisted to the messages table (the trust_* columns need
-    // migration 013 applied first); until then these are null on history reloads.
+    // Per-answer quality signals (see utils/answerSignals.ts). Persisted by
+    // migration 016; on the live turn they are merged in from the brain response
+    // regardless, so they are correct even before that migration is applied.
     trust_band?: string | null;
     trust_score?: number | null;
     trust_explanation?: string | null;
+    position_level?: string | null;
+    position_score?: number | null;
+    position_rationale?: string | null;
+    degraded?: boolean;
+    degradation_reason?: string | null;
+    degradation_note?: string | null;
+    clarifying_questions?: string[];
     not_found: boolean;
     credits_used: number;
     tokens_used: {
@@ -228,30 +240,38 @@ export async function startConversation(args: {
     cost: answer.cost,
   };
 
-  const { data: assistantMsg, error: msgError } = await supabaseAdmin
-    .from('messages')
-    .insert({
-      conversation_id: conv.id,
-      role: 'assistant',
-      content: answer.answer,
-      sources: answer.sources,
-      conflicts: answer.conflicts,
-      confidence_score: answer.confidence_score,
-      not_found: answer.not_found,
-      // NOTE: trust_* columns intentionally NOT written until migration 013 is
-      // applied to the product DB. The values still reach the client via the
-      // in-memory merge on the returned message below.
-      brain_request_id: answer.request_id ?? null,
-      credits_used: cost,
-      tokens_used: tokensUsedJsonb,
-      cost_usd: answer.cost.total_usd,
-      answer_length: length,
-      engine,
-    })
-    .select(
-      'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating'
-    )
-    .single();
+  // Answer signals ride along with the row; `insertWithSignals` retries without
+  // them if migration 016 hasn't reached this database yet, so an already-billed
+  // turn can never be lost to migration state.
+  const { data: assistantMsg, error: msgError } = await insertWithSignals(
+    {
+      table: 'messages',
+      answer,
+      row: {
+        conversation_id: conv.id,
+        role: 'assistant',
+        content: answer.answer,
+        sources: answer.sources,
+        conflicts: answer.conflicts,
+        confidence_score: answer.confidence_score,
+        not_found: answer.not_found,
+        brain_request_id: answer.request_id ?? null,
+        credits_used: cost,
+        tokens_used: tokensUsedJsonb,
+        cost_usd: answer.cost.total_usd,
+        answer_length: length,
+        engine,
+      },
+    },
+    (row) =>
+      supabaseAdmin
+        .from('messages')
+        .insert(row)
+        .select(
+          'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating'
+        )
+        .single()
+  );
   if (msgError || !assistantMsg) throw msgError ?? new Error('Message insert failed');
 
   await recordSearchHistory({
@@ -266,13 +286,11 @@ export async function startConversation(args: {
   return {
     conversationId: conv.id,
     newBalance,
-    // Merge the brain's trust signal in-memory (not persisted yet — see migration
-    // 013). The client surfaces trust_score as the user-facing % on this turn.
+    // Merge the brain's answer signals in-memory so this turn shows them even if
+    // the row couldn't carry them (migration 016 not yet applied).
     message: {
-      ...assistantMsg,
-      trust_band: answer.trust_band ?? null,
-      trust_score: answer.trust_score ?? null,
-      trust_explanation: answer.trust_explanation ?? null,
+      ...(assistantMsg as PersistedMessage['message']),
+      ...answerSignalFields(answer),
     },
   };
 }
@@ -372,30 +390,38 @@ export async function followUp(args: {
     cost: answer.cost,
   };
 
-  const { data: assistantMsg, error: msgError } = await supabaseAdmin
-    .from('messages')
-    .insert({
-      conversation_id: args.conversationId,
-      role: 'assistant',
-      content: answer.answer,
-      sources: answer.sources,
-      conflicts: answer.conflicts,
-      confidence_score: answer.confidence_score,
-      not_found: answer.not_found,
-      // NOTE: trust_* columns intentionally NOT written until migration 013 is
-      // applied to the product DB. The values still reach the client via the
-      // in-memory merge on the returned message below.
-      brain_request_id: answer.request_id ?? null,
-      credits_used: cost,
-      tokens_used: tokensUsedJsonb,
-      cost_usd: answer.cost.total_usd,
-      answer_length: length,
-      engine,
-    })
-    .select(
-      'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating'
-    )
-    .single();
+  // Answer signals ride along with the row; `insertWithSignals` retries without
+  // them if migration 016 hasn't reached this database yet, so an already-billed
+  // turn can never be lost to migration state.
+  const { data: assistantMsg, error: msgError } = await insertWithSignals(
+    {
+      table: 'messages',
+      answer,
+      row: {
+        conversation_id: args.conversationId,
+        role: 'assistant',
+        content: answer.answer,
+        sources: answer.sources,
+        conflicts: answer.conflicts,
+        confidence_score: answer.confidence_score,
+        not_found: answer.not_found,
+        brain_request_id: answer.request_id ?? null,
+        credits_used: cost,
+        tokens_used: tokensUsedJsonb,
+        cost_usd: answer.cost.total_usd,
+        answer_length: length,
+        engine,
+      },
+    },
+    (row) =>
+      supabaseAdmin
+        .from('messages')
+        .insert(row)
+        .select(
+          'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating'
+        )
+        .single()
+  );
   if (msgError || !assistantMsg) throw msgError ?? new Error('Message insert failed');
 
   await supabaseAdmin
@@ -415,13 +441,11 @@ export async function followUp(args: {
   return {
     conversationId: args.conversationId,
     newBalance,
-    // Merge the brain's trust signal in-memory (not persisted yet — see migration
-    // 013). The client surfaces trust_score as the user-facing % on this turn.
+    // Merge the brain's answer signals in-memory so this turn shows them even if
+    // the row couldn't carry them (migration 016 not yet applied).
     message: {
-      ...assistantMsg,
-      trust_band: answer.trust_band ?? null,
-      trust_score: answer.trust_score ?? null,
-      trust_explanation: answer.trust_explanation ?? null,
+      ...(assistantMsg as PersistedMessage['message']),
+      ...answerSignalFields(answer),
     },
   };
 }
@@ -448,13 +472,17 @@ export async function getConversation(userId: string, conversationId: string) {
   if (convError || !conv || conv.user_id !== userId) {
     throw new NotFoundError('Sohbet bulunamadı');
   }
-  const { data: messages, error: msgError } = await supabaseAdmin
-    .from('messages')
-    .select(
-      'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating'
-    )
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: true });
+  // Signals come back on a history reload too, so an old conversation shows the
+  // same trust / position / degradation vitals it showed when it was answered.
+  const { data: messages, error: msgError } = await selectWithSignals(
+    'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating',
+    (select) =>
+      supabaseAdmin
+        .from('messages')
+        .select(select)
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true })
+  );
   if (msgError) throw msgError;
 
   return {
