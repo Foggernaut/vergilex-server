@@ -13,7 +13,7 @@ import {
   followUpCost,
   v2ChatCost,
 } from '../../utils/creditCosts.js';
-import { deductCredits } from '../credits/credits.service.js';
+import { assertCanAfford, deductCredits } from '../credits/credits.service.js';
 import { NotFoundError } from '../../utils/errors.js';
 import { logger } from '../../config/logger.js';
 
@@ -164,11 +164,12 @@ export async function startConversation(args: {
     filters: args.filters,
     answer_length: length,
   };
+  const cost = priceFor(engine, 'start', length);
+  if (!args.precomputedAnswer) await assertCanAfford(args.userId, cost);
   const answer = args.precomputedAnswer ?? (engine === 'v2'
     ? await brainClient.answerV2(brainReq)
     : await brainClient.answer(brainReq));
 
-  const cost = priceFor(engine, 'start', length);
   const billingType = engine === 'v2' ? 'v2_chat' : 'chat';
 
   // V2 demo is free — skip the credit ledger entirely (cost = 0). For V1 the
@@ -322,11 +323,12 @@ export async function followUp(args: {
     history,
     answer_length: length,
   };
+  const cost = priceFor(engine, 'follow', length);
+  if (!args.precomputedAnswer) await assertCanAfford(args.userId, cost);
   const answer = args.precomputedAnswer ?? (engine === 'v2'
     ? await brainClient.answerV2(brainReq)
     : await brainClient.answer(brainReq));
 
-  const cost = priceFor(engine, 'follow', length);
   const billingType = engine === 'v2' ? 'v2_chat' : 'chat';
 
   let newBalance = 0;

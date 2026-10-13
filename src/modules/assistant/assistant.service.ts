@@ -11,7 +11,7 @@ import {
   assistantChatCost,
   assistantFollowUpCost,
 } from '../../utils/creditCosts.js';
-import { deductCredits } from '../credits/credits.service.js';
+import { assertCanAfford, deductCredits } from '../credits/credits.service.js';
 import { NotFoundError } from '../../utils/errors.js';
 
 /**
@@ -99,9 +99,10 @@ export async function startAssistantChat(args: {
     filters: args.filters,
     answer_length: length,
   };
+  const cost = assistantChatCost(length);
+  if (!args.precomputedAnswer) await assertCanAfford(args.userId, cost);
   const answer = args.precomputedAnswer ?? (await brainClient.assistantAnswer(brainReq));
 
-  const cost = assistantChatCost(length);
   const { newBalance } = await deductCredits({
     userId: args.userId,
     amount: cost,
@@ -201,9 +202,10 @@ export async function followUpAssistant(args: {
     history,
     answer_length: length,
   };
+  const cost = assistantFollowUpCost(length);
+  if (!args.precomputedAnswer) await assertCanAfford(args.userId, cost);
   const answer = args.precomputedAnswer ?? (await brainClient.assistantAnswer(brainReq));
 
-  const cost = assistantFollowUpCost(length);
   const { newBalance } = await deductCredits({
     userId: args.userId,
     amount: cost,

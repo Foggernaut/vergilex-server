@@ -63,6 +63,20 @@ export async function grantCredits(args: {
   };
 }
 
+/**
+ * Pre-flight balance check: throw InsufficientCreditsError (402) BEFORE any brain
+ * call when the user can't cover `cost`. The buffered routes used to call the brain
+ * first and only fail at deductCredits — a 3 Aşamalı run is ~9 min and ~$1 of LLM
+ * spend, and the user saw nothing (prod 2026-10-13: EventSource can't read the
+ * stream's 402, the web fell back to the buffered route, which ran the full
+ * pipeline and then failed at billing).
+ */
+export async function assertCanAfford(userId: string, cost: number): Promise<void> {
+  if (cost <= 0) return;
+  const balance = await getBalance(userId);
+  if (balance < cost) throw new InsufficientCreditsError();
+}
+
 export async function getBalance(userId: string): Promise<number> {
   const { data, error } = await supabaseAdmin
     .from('users')
