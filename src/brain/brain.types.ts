@@ -257,6 +257,21 @@ export const BrainFullTextResponseSchema = z.object({
 });
 export type BrainFullTextResponse = z.infer<typeof BrainFullTextResponseSchema>;
 
+// GET /v2/budget — Claude test bütçesi (yaklaşık; Beyin audit maliyetinden hesaplar).
+// Ayar yoksa yalnız { configured: false } gelir.
+export const BrainBudgetResponseSchema = z
+  .object({
+    configured: z.boolean(),
+    budget_usd: z.number().optional(),
+    spent_usd: z.number().optional(),
+    remaining_usd: z.number().optional(),
+    since: z.string().optional(),
+    as_of: z.string().optional(),
+    approximate: z.boolean().optional(),
+  })
+  .passthrough();
+export type BrainBudgetResponse = z.infer<typeof BrainBudgetResponseSchema>;
+
 // --- v2 feedback (👍/👎) ---
 
 export const BrainFeedbackRequestSchema = z.object({

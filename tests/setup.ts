@@ -6,3 +6,5 @@ process.env.SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY ?? 'test-anon-key'
 process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY ?? 'test-service-key';
 process.env.BRAIN_API_URL = process.env.BRAIN_API_URL ?? 'http://localhost:8000';
 process.env.BRAIN_API_KEY = process.env.BRAIN_API_KEY ?? 'test-brain-key';
+process.env.MEVZUAT_SUPABASE_URL = process.env.MEVZUAT_SUPABASE_URL ?? 'https://test-mevzuat.supabase.co';
+process.env.MEVZUAT_SUPABASE_SERVICE_KEY = process.env.MEVZUAT_SUPABASE_SERVICE_KEY ?? 'test-mevzuat-service-key';
