@@ -26,7 +26,9 @@ import {
   type BrainBrowseDocumentsRequest,
   type BrainBrowseDocumentsResponse,
   BrainBrowseDocumentsResponseSchema,
+  type BrainBudgetResponse,
   type BrainFullTextResponse,
+  BrainBudgetResponseSchema,
   BrainFullTextResponseSchema,
   type BrainDocumentResult,
   type BrainStreamEvent,
@@ -253,6 +255,11 @@ export class BrainClient {
     parent_id?: string;
   }): Promise<BrainFullTextResponse> {
     return this.get('/v2/document', params, BrainFullTextResponseSchema);
+  }
+
+  /** Claude test bütçesi (admin rozeti) — GET /v2/budget. */
+  async getClaudeBudget(): Promise<BrainBudgetResponse> {
+    return this.get('/v2/budget', {}, BrainBudgetResponseSchema);
   }
 
   async health(): Promise<{ status: string }> {
