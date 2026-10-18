@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { MAX_QUERY_CHARS, MIN_QUERY_CHARS } from '../../utils/queryLimits.js';
 
 export const newAssistantChatSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   filters: z
     .object({
       law_id: z.string().nullable().optional(),
@@ -14,6 +15,6 @@ export const newAssistantChatSchema = z.object({
 });
 
 export const assistantFollowUpSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   answer_length: z.enum(['short', 'medium', 'long']).optional(),
 });

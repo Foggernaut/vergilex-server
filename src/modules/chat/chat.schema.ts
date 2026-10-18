@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AnswerLengthSchema } from '../../brain/brain.types.js';
+import { MAX_QUERY_CHARS, MIN_QUERY_CHARS } from '../../utils/queryLimits.js';
 
 export const filtersSchema = z
   .object({
@@ -8,13 +9,13 @@ export const filtersSchema = z
   .optional();
 
 export const newChatSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   filters: filtersSchema,
   answer_length: AnswerLengthSchema.optional(),
 });
 
 export const followUpSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   answer_length: AnswerLengthSchema.optional(),
 });
 

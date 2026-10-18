@@ -5,15 +5,16 @@ import { AppError, AuthError } from '../../utils/errors.js';
 import { followUp, recordSearchHistory, startConversation } from '../chat/chat.service.js';
 import { streamConversation, streamFollowUp } from '../chat/chat.stream.service.js';
 import { SseWriter } from '../../utils/sse.js';
+import { MAX_QUERY_CHARS, MIN_QUERY_CHARS } from '../../utils/queryLimits.js';
 
 const newV2ChatSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   filters: z.object({ law_id: z.string().nullable().optional() }).optional(),
   answer_length: z.enum(['short', 'medium', 'long']).optional(),
 });
 
 const v2FollowUpSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   answer_length: z.enum(['short', 'medium', 'long']).optional(),
 });
 
