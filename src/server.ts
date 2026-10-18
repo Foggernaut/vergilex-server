@@ -1,3 +1,4 @@
+import { createServer } from 'node:http';
 import { Agent, setGlobalDispatcher } from 'undici';
 import { createApp } from './app.js';
 import { env } from './config/env.js';
@@ -21,7 +22,16 @@ setGlobalDispatcher(
 
 const app = createApp();
 
-const server = app.listen(env.PORT, () => {
+// ── Inbound header budget for long questions ─────────────────────────────────
+// The assistant stream is an EventSource GET: the question rides in the query
+// string (EventSource can't send a body). Soru tavanı 4000 karakter; Türkçe
+// karakterler URL'de 6 bayta kodlanır → istek satırı 10–24 KB olabilir. Node'un
+// varsayılan 16 KB başlık sınırı bunu 431 ile reddederdi (fallback POST da uzun
+// 3 Aşamalı cevaplarda istemci zaman aşımına düşer). 64 KB = 4000 karakter + JWT
+// + çerezler için bol pay.
+const MAX_HEADER_BYTES = 64 * 1024;
+
+const server = createServer({ maxHeaderSize: MAX_HEADER_BYTES }, app).listen(env.PORT, () => {
   logger.info(`vergilex-server listening`, {
     port: env.PORT,
     env: env.NODE_ENV,
