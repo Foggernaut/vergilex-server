@@ -125,7 +125,15 @@ export const analyzeDocument: RequestHandler = async (req, res, next) => {
         'Sadece PDF veya düz metin dosyaları desteklenir'
       );
     }
-    const query = typeof req.body?.query === 'string' ? req.body.query.slice(0, 1000) : undefined;
+    const rawQuery = typeof req.body?.query === 'string' ? req.body.query.trim() : undefined;
+    if (rawQuery && rawQuery.length > MAX_QUERY_CHARS) {
+      throw new AppError(
+        400,
+        'QUERY_TOO_LONG',
+        `Soru en fazla ${MAX_QUERY_CHARS} karakter olabilir`
+      );
+    }
+    const query = rawQuery || undefined;
 
     const result = await brainClient.analyzeDocument({
       file: file.buffer,
