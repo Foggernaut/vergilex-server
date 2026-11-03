@@ -1,4 +1,4 @@
--- 016_kaynak_envanteri.sql
+-- 018_kaynak_envanteri.sql (016 olarak yazılmıştı; main 016_answer_signals + 017 eklediği için yeniden numaralandı — içerik aynı, idempotent)
 -- Araştırma protokolü (Faz 5): kaynak envanterini cevapla birlikte sakla — tür başına
 -- arandı / bulundu / sentezde sayımı ve "neden yok" (kısıt, kapalı korpus, teknik hata,
 -- sonuç yok). Cevap metnindeki "Taranan kaynaklar:" satırının yapısal hâli; web bunu

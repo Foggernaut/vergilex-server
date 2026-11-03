@@ -48,3 +48,40 @@ describe('withOptionalColumn', () => {
     expect(res.error?.code).toBe('23505');
   });
 });
+
+// Main'in sinyal kolonları (insertWithSignals) ile envanter kolonu (withOptionalColumn) İÇ İÇE: biri eksikse
+// diğeri yazılmaya devam eder (iki migration bağımsız; 016/017 sinyaller, 018 envanter).
+import { insertWithSignals } from '../src/utils/answerSignals.js';
+import type { BrainAnswerResponse } from '../src/brain/brain.types.js';
+
+describe('withOptionalColumn ∘ insertWithSignals', () => {
+  const answer = { trust_band: 'HIGH', kaynak_envanteri: { turler: [], atlandi: false, celiski: false } } as unknown as BrainAnswerResponse;
+
+  async function kos(eksik: Set<string>) {
+    const yazilan: Record<string, unknown>[] = [];
+    const res = await withOptionalColumn('kaynak_envanteri', (include) =>
+      insertWithSignals(
+        { table: 'messages', answer, row: { content: 'x', ...(include ? { kaynak_envanteri: answer.kaynak_envanteri } : {}) } },
+        async (row) => {
+          yazilan.push(row);
+          const bad = Object.keys(row).find((k) => eksik.has(k));
+          return bad ? { data: null, error: { code: 'PGRST204', message: bad } } : { data: { id: 'm' }, error: null };
+        }
+      ), 'test');
+    return { res, son: yazilan[yazilan.length - 1]! };
+  }
+
+  it('envanter kolonu yok, sinyaller var → sinyaller yazılır, envanter düşer', async () => {
+    const { res, son } = await kos(new Set(['kaynak_envanteri']));
+    expect(res.error).toBeNull();
+    expect(son.trust_band).toBe('HIGH');
+    expect('kaynak_envanteri' in son).toBe(false);
+  });
+
+  it('sinyal kolonları yok, envanter var → envanter yazılır, sinyaller düşer', async () => {
+    const { res, son } = await kos(new Set(['trust_band']));
+    expect(res.error).toBeNull();
+    expect(son.kaynak_envanteri).toBeTruthy();
+    expect('trust_band' in son).toBe(false);
+  });
+});
