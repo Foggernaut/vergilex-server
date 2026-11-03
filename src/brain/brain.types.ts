@@ -249,8 +249,9 @@ export const BrainAnswerResponseSchema = z.object({
   // Structured tax-calculation result (tax-assessment questions only). Its
   // human-readable breakdown is ALREADY appended to `answer` as markdown, so it
   // is neither persisted nor forwarded today; it stays in the schema so zod does
-  // not strip it and a future UI can use it.
-  hesap: z.record(z.unknown()).nullable().optional(),
+  // not strip it and a future UI can use it. `.catch(null)`: an unused field must
+  // never fail the whole answer parse if its shape ever drifts.
+  hesap: z.record(z.unknown()).nullable().optional().catch(null),
   // takip-tespit: true iff the brain classified THIS turn as a new topic (not a
   // continuation) and ignored prior history. We persist this as a context
   // boundary on the new user message so future turns load history only from

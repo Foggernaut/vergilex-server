@@ -199,6 +199,15 @@ describe('BrainAnswerResponseSchema — answer signals', () => {
     expect(parsed.hesap).toBeNull();
   });
 
+  it('a malformed hesap degrades to null instead of failing the answer', () => {
+    const parsed = BrainAnswerResponseSchema.safeParse({
+      ...baseAnswer,
+      hesap: [{ kalem: 'vergi farkı' }],
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.hesap).toBeNull();
+  });
+
   it('accepts an unknown future sonuc_durumu label', () => {
     const parsed = BrainAnswerResponseSchema.safeParse({
       ...baseAnswer,
