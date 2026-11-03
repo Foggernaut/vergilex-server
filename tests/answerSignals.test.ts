@@ -43,6 +43,7 @@ describe('answerSignalFields / answerSignalRow', () => {
     expect(fields.clarifying_questions).toEqual([]);
     expect(fields.trust_band).toBeNull();
     expect(fields.position_level).toBeNull();
+    expect(fields.sonuc_durumu).toBeNull();
   });
 
   it('passes every signal through unchanged when the brain sends them', () => {
@@ -58,6 +59,7 @@ describe('answerSignalFields / answerSignalRow', () => {
         degradation_reason: 'unfaithful_citation',
         degradation_note: 'not',
         clarifying_questions: ['Tam mükellef mi?'],
+        sonuc_durumu: 'ek bilgi gerekli',
       })
     );
     expect(fields).toMatchObject({
@@ -66,7 +68,20 @@ describe('answerSignalFields / answerSignalRow', () => {
       degraded: true,
       degradation_reason: 'unfaithful_citation',
       clarifying_questions: ['Tam mükellef mi?'],
+      sonuc_durumu: 'ek bilgi gerekli',
     });
+  });
+
+  // The verdict label rides the same two shapes as every other signal: the client
+  // merge and the INSERT row both carry it, unknown future labels included.
+  it('carries sonuc_durumu into both the client fields and the INSERT row', () => {
+    const a = answer({ sonuc_durumu: 'ihtimal' });
+    expect(answerSignalFields(a).sonuc_durumu).toBe('ihtimal');
+    expect(answerSignalRow(a).sonuc_durumu).toBe('ihtimal');
+    expect(answerSignalRow(answer({ sonuc_durumu: 'yeni etiket' })).sonuc_durumu).toBe(
+      'yeni etiket'
+    );
+    expect(answerSignalRow(answer()).sonuc_durumu).toBeNull();
   });
 
   // The INSERT shape differs in exactly one place from the client shape: an empty
@@ -143,6 +158,30 @@ describe('insertWithSignals', () => {
     expect(result.data).toEqual({ id: 'm1' });
   });
 
+  // 016 applied but 017 not: the DB rejects sonuc_durumu alone. The fallback is
+  // all-or-nothing, so the row still lands (without any signal column).
+  it('still inserts the row when only the sonuc_durumu column is missing', async () => {
+    const run = vi.fn().mockImplementation(async (row: Record<string, unknown>) =>
+      'sonuc_durumu' in row
+        ? {
+            data: null,
+            error: { code: 'PGRST204', message: "Could not find the 'sonuc_durumu' column" },
+          }
+        : { data: { id: 'm1' }, error: null }
+    );
+
+    const result = await insertWithSignals(
+      { table: 'messages', row: baseRow, answer: answer({ sonuc_durumu: 'ihtimal' }) },
+      run
+    );
+
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[0][0]).toMatchObject({ sonuc_durumu: 'ihtimal' });
+    expect(run.mock.calls[1][0]).toEqual(baseRow);
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual({ id: 'm1' });
+  });
+
   it('does not retry on an unrelated failure, so real errors still surface', async () => {
     const error = { code: '23503', message: 'fk violation' };
     const run = vi.fn().mockResolvedValue({ data: null, error });
@@ -161,6 +200,7 @@ describe('selectWithSignals', () => {
 
     expect(run).toHaveBeenCalledTimes(1);
     expect(run.mock.calls[0][0]).toContain('trust_band');
+    expect(run.mock.calls[0][0]).toContain('sonuc_durumu');
     expect(result.data).toEqual([{ id: 'm1' }]);
   });
 

@@ -241,6 +241,16 @@ export const BrainAnswerResponseSchema = z.object({
   // facts the question left unspecified, which the client offers as one-tap
   // follow-up questions. Defaulted so legacy/v1 responses still parse.
   clarifying_questions: z.array(z.string()).default([]),
+  // Tek bakışta sonuç etiketi ("kesin değerlendirme" | "ihtimal" | "ek bilgi
+  // gerekli" …). Bare string on purpose, same as `position_level`: the brain owns
+  // this vocabulary and a new label must never make the whole response fail to
+  // parse. Forwarded to the client and persisted (migration 017).
+  sonuc_durumu: z.string().nullable().optional(),
+  // Structured tax-calculation result (tax-assessment questions only). Its
+  // human-readable breakdown is ALREADY appended to `answer` as markdown, so it
+  // is neither persisted nor forwarded today; it stays in the schema so zod does
+  // not strip it and a future UI can use it.
+  hesap: z.record(z.unknown()).nullable().optional(),
   // takip-tespit: true iff the brain classified THIS turn as a new topic (not a
   // continuation) and ignored prior history. We persist this as a context
   // boundary on the new user message so future turns load history only from

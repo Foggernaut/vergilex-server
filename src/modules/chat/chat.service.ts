@@ -118,7 +118,7 @@ interface PersistedMessage {
     conflicts: BrainAnswerResponse['conflicts'];
     confidence_score: number;
     // Per-answer quality signals (see utils/answerSignals.ts). Persisted by
-    // migration 016; on the live turn they are merged in from the brain response
+    // migrations 016 + 017; on the live turn they are merged in from the brain response
     // regardless, so they are correct even before that migration is applied.
     trust_band?: string | null;
     trust_score?: number | null;
@@ -130,6 +130,7 @@ interface PersistedMessage {
     degradation_reason?: string | null;
     degradation_note?: string | null;
     clarifying_questions?: string[];
+    sonuc_durumu?: string | null;
     not_found: boolean;
     credits_used: number;
     tokens_used: {
