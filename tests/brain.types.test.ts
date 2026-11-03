@@ -164,6 +164,16 @@ describe('kaynak_envanteri', () => {
     expect(parsed.kaynak_envanteri?.turler[2]?.capali).toBe(0);   // eksik sayaç varsayılanı
   });
 
+  it('answer: keeps kontrol_tebligleri (ilgili genel tebliğ adları), defaults to []', () => {
+    const withNames = BrainAnswerResponseSchema.parse({
+      ...baseAnswer,
+      kaynak_envanteri: { ...envanter, kontrol_tebligleri: ['KDV Genel Uygulama Tebliği'] },
+    });
+    expect(withNames.kaynak_envanteri?.kontrol_tebligleri).toEqual(['KDV Genel Uygulama Tebliği']);
+    expect(BrainAnswerResponseSchema.parse({ ...baseAnswer, kaynak_envanteri: envanter })
+      .kaynak_envanteri?.kontrol_tebligleri).toEqual([]);
+  });
+
   it('answer: missing envanter parses (legacy / skipped)', () => {
     const parsed = BrainAnswerResponseSchema.parse(baseAnswer);
     expect(parsed.kaynak_envanteri ?? null).toBeNull();

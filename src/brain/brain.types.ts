@@ -238,6 +238,8 @@ export const BrainKaynakEnvanteriSchema = z.object({
   ),
   atlandi: z.boolean().default(false),
   celiski: z.boolean().default(false),
+  // Tebliğ bulunamadığında "hangi genel tebliğe bakılmalı" yönlendirmesi (metin satırındaki "(ilgili: …)").
+  kontrol_tebligleri: z.array(z.string()).default([]),
 });
 export type BrainKaynakEnvanteri = z.infer<typeof BrainKaynakEnvanteriSchema>;
 
