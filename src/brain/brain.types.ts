@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_QUERY_CHARS, MIN_QUERY_CHARS } from '../utils/queryLimits.js';
 
 // Mirrors mevzuat-knowledge-api v2 Pydantic models.
 
@@ -94,7 +95,7 @@ export const BrainFiltersSchema = z
   .optional();
 
 export const BrainFindDocumentsRequestSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   filters: BrainFiltersSchema,
   limit: z.number().int().min(1).max(50).optional().default(20),
 });
@@ -127,7 +128,7 @@ export const BrainBrowseFiltersSchema = z.object({
 export type BrainBrowseFilters = z.infer<typeof BrainBrowseFiltersSchema>;
 
 export const BrainBrowseDocumentsRequestSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   filters: BrainBrowseFiltersSchema.optional(),
   // Candidate chunks pulled per corpus BEFORE parent-dedupe (1..200).
   per_corpus: z.number().int().min(1).max(200).optional(),
@@ -170,7 +171,7 @@ export const BrainHistoryItemSchema = z.object({
 export type BrainHistoryItem = z.infer<typeof BrainHistoryItemSchema>;
 
 export const BrainAnswerRequestSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   filters: BrainFiltersSchema,
   history: z.array(BrainHistoryItemSchema).optional(),
   answer_length: AnswerLengthSchema.optional(),
