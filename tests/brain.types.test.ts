@@ -170,6 +170,52 @@ describe('BrainAnswerResponseSchema — answer signals', () => {
     expect(parsed.clarifying_questions).toEqual(['Şirket tam mükellef mi?']);
   });
 
+  // sonuc_durumu is a bare string on purpose (the brain owns the vocabulary), and
+  // hesap is the structured tax-calculation result — both must survive the parse
+  // rather than be stripped, and both are absent on non-tax / legacy responses.
+  it('retains sonuc_durumu and hesap through parse', () => {
+    const parsed = BrainAnswerResponseSchema.parse({
+      ...baseAnswer,
+      sonuc_durumu: 'kesin değerlendirme',
+      hesap: { matrah: 1000, oran: 0.2, toplam: 200 },
+    });
+    expect(parsed.sonuc_durumu).toBe('kesin değerlendirme');
+    expect(parsed.hesap).toEqual({ matrah: 1000, oran: 0.2, toplam: 200 });
+  });
+
+  it('parses with sonuc_durumu and hesap omitted', () => {
+    const parsed = BrainAnswerResponseSchema.parse(baseAnswer);
+    expect(parsed.sonuc_durumu).toBeUndefined();
+    expect(parsed.hesap).toBeUndefined();
+  });
+
+  it('accepts explicit nulls for sonuc_durumu and hesap (FastAPI wire shape)', () => {
+    const parsed = BrainAnswerResponseSchema.parse({
+      ...baseAnswer,
+      sonuc_durumu: null,
+      hesap: null,
+    });
+    expect(parsed.sonuc_durumu).toBeNull();
+    expect(parsed.hesap).toBeNull();
+  });
+
+  it('a malformed hesap degrades to null instead of failing the answer', () => {
+    const parsed = BrainAnswerResponseSchema.safeParse({
+      ...baseAnswer,
+      hesap: [{ kalem: 'vergi farkı' }],
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.hesap).toBeNull();
+  });
+
+  it('accepts an unknown future sonuc_durumu label', () => {
+    const parsed = BrainAnswerResponseSchema.safeParse({
+      ...baseAnswer,
+      sonuc_durumu: 'yeni bir etiket',
+    });
+    expect(parsed.success).toBe(true);
+  });
+
   it('defaults clarifying_questions to [] when the brain omits it', () => {
     const parsed = BrainAnswerResponseSchema.parse(baseAnswer);
     expect(parsed.clarifying_questions).toEqual([]);

@@ -5,6 +5,7 @@ import { brainClient } from '../../brain/brain.client.js';
 import { deductCredits } from '../credits/credits.service.js';
 import { CREDIT_COSTS } from '../../utils/creditCosts.js';
 import { supabaseAdmin } from '../../config/supabase.js';
+import { MAX_QUERY_CHARS, MIN_QUERY_CHARS } from '../../utils/queryLimits.js';
 
 // Belge Bul = advanced search: LLM query-parse (smart) + facet filters + hybrid/rerank.
 // Deep per-corpus recall, parent-deduped, paginated client-side.
@@ -22,7 +23,7 @@ const facetSchema = z
   .optional();
 
 const docFinderSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   filters: facetSchema,
   per_corpus: z.number().int().min(1).max(200).optional(),
   smart: z.boolean().optional(),

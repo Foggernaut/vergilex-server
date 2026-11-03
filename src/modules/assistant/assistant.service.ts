@@ -55,6 +55,7 @@ export interface AssistantPersistResult {
     degradation_reason?: string | null;
     degradation_note?: string | null;
     clarifying_questions?: string[];
+    sonuc_durumu?: string | null;
     not_found: boolean;
     credits_used: number;
     tokens_used: {

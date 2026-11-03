@@ -11,13 +11,16 @@ import type { BrainAnswerResponse } from '../brain/brain.types.js';
  *   degraded/…  — a blocking güvence gate stripped unverifiable sentences instead
  *                 of dropping the whole answer
  * plus `clarifying_questions`, the machine-readable form of the answer's EKSİK
- * BİLGİ section.
+ * BİLGİ section, and `sonuc_durumu`, the one-glance verdict label
+ * ("kesin değerlendirme" | "ihtimal" | "ek bilgi gerekli").
  *
- * Persisted by migration 016_answer_signals.sql. Everything here degrades
- * gracefully when that migration has NOT been applied to the running database
- * yet: the write retries without the signal columns and the read falls back to
- * the base column list, so deploying this code ahead of the migration can never
- * cost a user a billed answer. The live turn is unaffected either way, because
+ * Persisted by migrations 016_answer_signals.sql and 017_answer_sonuc_durumu.sql.
+ * Everything here degrades gracefully when those migrations have NOT been
+ * applied to the running database yet: the write retries without the signal
+ * columns and the read falls back to the base column list, so deploying this
+ * code ahead of the migrations can never cost a user a billed answer. The
+ * fallback is all-or-nothing — a missing column (any one of them, so 017 alone
+ * missing too) drops EVERY signal column from that write / read. The live turn is unaffected either way, because
  * the values are merged into the returned message from the brain response in
  * memory (see `answerSignalFields`).
  */
@@ -32,6 +35,7 @@ export const ANSWER_SIGNAL_COLUMNS = [
   'degradation_reason',
   'degradation_note',
   'clarifying_questions',
+  'sonuc_durumu',
 ] as const;
 
 /** Signal columns as a PostgREST select fragment (no leading comma). */
@@ -59,6 +63,7 @@ export function answerSignalFields(answer: BrainAnswerResponse) {
     degradation_reason: answer.degradation_reason ?? null,
     degradation_note: answer.degradation_note ?? null,
     clarifying_questions: answer.clarifying_questions ?? [],
+    sonuc_durumu: answer.sonuc_durumu ?? null,
   };
 }
 
@@ -78,8 +83,8 @@ export function answerSignalRow(answer: BrainAnswerResponse): Record<string, unk
 
 /**
  * True when PostgREST rejected the statement because a column it mentions does
- * not exist on the running database — i.e. migration 016 hasn't been applied
- * here yet. PGRST204 is PostgREST's own "column not found in schema cache";
+ * not exist on the running database — i.e. migration 016 / 017 hasn't been
+ * applied here yet. PGRST204 is PostgREST's own "column not found in schema cache";
  * 42703 is Postgres' undefined_column.
  */
 export function isUnknownColumnError(error: unknown): boolean {
@@ -120,7 +125,7 @@ export async function insertWithSignals<T>(
   if (!first.error || !isUnknownColumnError(first.error)) return first;
 
   logger.warn(
-    'answer signal columns missing — inserting without them (apply migration 016_answer_signals.sql)',
+    'answer signal columns missing — inserting without them (apply migrations 016_answer_signals.sql, 017_answer_sonuc_durumu.sql)',
     { table: args.table, code: first.error.code, message: first.error.message }
   );
   return run(args.row);
@@ -139,7 +144,7 @@ export async function selectWithSignals<T>(
   if (!first.error || !isUnknownColumnError(first.error)) return first;
 
   logger.warn(
-    'answer signal columns missing — reading without them (apply migration 016_answer_signals.sql)',
+    'answer signal columns missing — reading without them (apply migrations 016_answer_signals.sql, 017_answer_sonuc_durumu.sql)',
     { code: first.error.code, message: first.error.message }
   );
   return run(baseSelect);

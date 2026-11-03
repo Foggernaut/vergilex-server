@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_QUERY_CHARS, MIN_QUERY_CHARS } from '../utils/queryLimits.js';
 
 // Mirrors mevzuat-knowledge-api v2 Pydantic models.
 
@@ -94,7 +95,7 @@ export const BrainFiltersSchema = z
   .optional();
 
 export const BrainFindDocumentsRequestSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   filters: BrainFiltersSchema,
   limit: z.number().int().min(1).max(50).optional().default(20),
 });
@@ -127,7 +128,7 @@ export const BrainBrowseFiltersSchema = z.object({
 export type BrainBrowseFilters = z.infer<typeof BrainBrowseFiltersSchema>;
 
 export const BrainBrowseDocumentsRequestSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   filters: BrainBrowseFiltersSchema.optional(),
   // Candidate chunks pulled per corpus BEFORE parent-dedupe (1..200).
   per_corpus: z.number().int().min(1).max(200).optional(),
@@ -170,7 +171,7 @@ export const BrainHistoryItemSchema = z.object({
 export type BrainHistoryItem = z.infer<typeof BrainHistoryItemSchema>;
 
 export const BrainAnswerRequestSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   filters: BrainFiltersSchema,
   history: z.array(BrainHistoryItemSchema).optional(),
   answer_length: AnswerLengthSchema.optional(),
@@ -240,6 +241,17 @@ export const BrainAnswerResponseSchema = z.object({
   // facts the question left unspecified, which the client offers as one-tap
   // follow-up questions. Defaulted so legacy/v1 responses still parse.
   clarifying_questions: z.array(z.string()).default([]),
+  // Tek bakışta sonuç etiketi ("kesin değerlendirme" | "ihtimal" | "ek bilgi
+  // gerekli" …). Bare string on purpose, same as `position_level`: the brain owns
+  // this vocabulary and a new label must never make the whole response fail to
+  // parse. Forwarded to the client and persisted (migration 017).
+  sonuc_durumu: z.string().nullable().optional(),
+  // Structured tax-calculation result (tax-assessment questions only). Its
+  // human-readable breakdown is ALREADY appended to `answer` as markdown, so it
+  // is neither persisted nor forwarded today; it stays in the schema so zod does
+  // not strip it and a future UI can use it. `.catch(null)`: an unused field must
+  // never fail the whole answer parse if its shape ever drifts.
+  hesap: z.record(z.unknown()).nullable().optional().catch(null),
   // takip-tespit: true iff the brain classified THIS turn as a new topic (not a
   // continuation) and ignored prior history. We persist this as a context
   // boundary on the new user message so future turns load history only from
