@@ -3,6 +3,7 @@ import {
   BrainDocumentResultSchema,
   BrainFindDocumentsResponseSchema,
   BrainAnswerResponseSchema,
+  BrainBrowseDocumentsResponseSchema,
   KNOWN_SOURCE_TYPES,
 } from '../src/brain/brain.types.js';
 
@@ -127,5 +128,81 @@ describe('response schemas carry new source types', () => {
       secondary_legislation_note: null,
     });
     expect(parsed.success).toBe(true);
+  });
+});
+
+
+// Araştırma protokolü Faz 5: kaynak envanteri ("Taranan kaynaklar") yanıtta yapısal alan olarak
+// gelir ve mesajla birlikte saklanır. Bozuk ya da eksik envanter CEVABI DÜŞÜRMEZ → null.
+describe('kaynak_envanteri', () => {
+  const baseAnswer = {
+    answer: 'cevap',
+    sources: [baseDoc],
+    conflicts: [],
+    confidence_score: 0.8,
+    tokens_used: { prompt: 10, completion: 5 },
+    not_found: false,
+    secondary_legislation_note: null,
+  };
+  const envanter = {
+    turler: [
+      { tur: 'kanun', grup: 'duzenleme', arandi: true, bulundu: 3, sentez: 2, en_iyi_skor: 0.9,
+        neden_yok: null, capali: 0, guncellik_uyari: 0 },
+      { tur: 'teblig', grup: 'duzenleme', arandi: true, bulundu: 0, sentez: 0, en_iyi_skor: null,
+        neden_yok: 'sonuc_yok', capali: 0, guncellik_uyari: 0 },
+      { tur: 'danistay_karar', grup: 'denetim', arandi: false, bulundu: 0, sentez: 0, en_iyi_skor: null,
+        neden_yok: 'kullanici_kisiti' },
+    ],
+    atlandi: false,
+    celiski: true,
+  };
+
+  it('answer: retains a well-formed envanter through parse', () => {
+    const parsed = BrainAnswerResponseSchema.parse({ ...baseAnswer, kaynak_envanteri: envanter });
+    expect(parsed.kaynak_envanteri?.turler).toHaveLength(3);
+    expect(parsed.kaynak_envanteri?.celiski).toBe(true);
+    expect(parsed.kaynak_envanteri?.turler[2]?.capali).toBe(0);   // eksik sayaç varsayılanı
+  });
+
+  it('answer: missing envanter parses (legacy / skipped)', () => {
+    const parsed = BrainAnswerResponseSchema.parse(baseAnswer);
+    expect(parsed.kaynak_envanteri ?? null).toBeNull();
+    expect(BrainAnswerResponseSchema.parse({ ...baseAnswer, kaynak_envanteri: null }).kaynak_envanteri).toBeNull();
+  });
+
+  it('answer: malformed envanter becomes null, the answer survives', () => {
+    const parsed = BrainAnswerResponseSchema.safeParse({ ...baseAnswer, kaynak_envanteri: { turler: 'x' } });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.kaynak_envanteri).toBeNull();
+    expect(parsed.success && parsed.data.answer).toBe('cevap');
+  });
+
+  const baseBrowse = {
+    documents: [baseDoc],
+    total_found: 1,
+    per_corpus_counts: { danistay: 1 },
+    search_time_ms: 12,
+    applied: { smart: false, reranked: false, semantic_query: 'q' },
+  };
+  const browseEnv = {
+    gruplar: [
+      { grup: 'duzenleme', etiket: 'Düzenleme ve idarenin yorumu',
+        korpuslar: [{ korpus: 'teblig', etiket: 'Tebliğler', sayi: 0, durum: 'sonuc_yok' }] },
+      { grup: 'denetim', etiket: 'Yargı ve öğretinin yaklaşımı',
+        korpuslar: [{ korpus: 'danistay', etiket: 'Danıştay Kararları', sayi: 1, durum: 'bulundu' },
+                    { korpus: 'iham', etiket: 'AİHM Kararları', sayi: 0, durum: 'kapali' }] },
+    ],
+  };
+
+  it('browse: retains grouped counters', () => {
+    const parsed = BrainBrowseDocumentsResponseSchema.parse({ ...baseBrowse, kaynak_envanteri: browseEnv });
+    expect(parsed.kaynak_envanteri?.gruplar[1]?.korpuslar[1]?.durum).toBe('kapali');
+  });
+
+  it('browse: malformed or missing envanter becomes null, results survive', () => {
+    const bad = BrainBrowseDocumentsResponseSchema.safeParse({ ...baseBrowse, kaynak_envanteri: { gruplar: 3 } });
+    expect(bad.success && bad.data.kaynak_envanteri).toBeNull();
+    expect(bad.success && bad.data.documents).toHaveLength(1);
+    expect(BrainBrowseDocumentsResponseSchema.parse(baseBrowse).kaynak_envanteri ?? null).toBeNull();
   });
 });

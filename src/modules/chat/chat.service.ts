@@ -16,6 +16,7 @@ import {
 import { deductCredits } from '../credits/credits.service.js';
 import { NotFoundError } from '../../utils/errors.js';
 import { logger } from '../../config/logger.js';
+import { withOptionalColumn } from '../../utils/optionalColumn.js';
 
 const MAX_HISTORY_TURNS = 6;
 const TITLE_MAX = 80;
@@ -102,6 +103,13 @@ export async function recordSearchHistory(row: {
   }
 }
 
+// Mesaj satırı kolonları. `kaynak_envanteri` (migration 016) OPSİYONEL: ürün DB'sine henüz
+// uygulanmadıysa sorgu kolonsuz tekrar denenir (withOptionalColumn) — kayıt/geçmiş kırılmaz.
+const MSG_COLS =
+  'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating';
+const ENVANTER_COL = 'kaynak_envanteri';
+const msgCols = (include: boolean): string => (include ? `${MSG_COLS}, ${ENVANTER_COL}` : MSG_COLS);
+
 interface PersistedMessage {
   conversationId: string;
   newBalance: number;
@@ -118,6 +126,8 @@ interface PersistedMessage {
     trust_band?: string | null;
     trust_score?: number | null;
     trust_explanation?: string | null;
+    // Araştırma protokolü: kaynak envanteri (cevaptaki "Taranan kaynaklar" satırının yapısal hâli).
+    kaynak_envanteri?: BrainAnswerResponse['kaynak_envanteri'] | null;
     not_found: boolean;
     credits_used: number;
     tokens_used: {
@@ -228,7 +238,8 @@ export async function startConversation(args: {
     cost: answer.cost,
   };
 
-  const { data: assistantMsg, error: msgError } = await supabaseAdmin
+  const { data: assistantMsg, error: msgError } = await withOptionalColumn(ENVANTER_COL, (include) =>
+    supabaseAdmin
     .from('messages')
     .insert({
       conversation_id: conv.id,
@@ -247,11 +258,10 @@ export async function startConversation(args: {
       cost_usd: answer.cost.total_usd,
       answer_length: length,
       engine,
+      ...(include ? { kaynak_envanteri: answer.kaynak_envanteri ?? null } : {}),
     })
-    .select(
-      'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating'
-    )
-    .single();
+    .select(msgCols(include))
+    .single(), 'chat.persistMessage');
   if (msgError || !assistantMsg) throw msgError ?? new Error('Message insert failed');
 
   await recordSearchHistory({
@@ -269,10 +279,11 @@ export async function startConversation(args: {
     // Merge the brain's trust signal in-memory (not persisted yet — see migration
     // 013). The client surfaces trust_score as the user-facing % on this turn.
     message: {
-      ...assistantMsg,
+      ...(assistantMsg as unknown as PersistedMessage['message']),
       trust_band: answer.trust_band ?? null,
       trust_score: answer.trust_score ?? null,
       trust_explanation: answer.trust_explanation ?? null,
+      kaynak_envanteri: answer.kaynak_envanteri ?? null,
     },
   };
 }
@@ -372,7 +383,8 @@ export async function followUp(args: {
     cost: answer.cost,
   };
 
-  const { data: assistantMsg, error: msgError } = await supabaseAdmin
+  const { data: assistantMsg, error: msgError } = await withOptionalColumn(ENVANTER_COL, (include) =>
+    supabaseAdmin
     .from('messages')
     .insert({
       conversation_id: args.conversationId,
@@ -391,11 +403,10 @@ export async function followUp(args: {
       cost_usd: answer.cost.total_usd,
       answer_length: length,
       engine,
+      ...(include ? { kaynak_envanteri: answer.kaynak_envanteri ?? null } : {}),
     })
-    .select(
-      'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating'
-    )
-    .single();
+    .select(msgCols(include))
+    .single(), 'chat.persistMessage');
   if (msgError || !assistantMsg) throw msgError ?? new Error('Message insert failed');
 
   await supabaseAdmin
@@ -418,10 +429,11 @@ export async function followUp(args: {
     // Merge the brain's trust signal in-memory (not persisted yet — see migration
     // 013). The client surfaces trust_score as the user-facing % on this turn.
     message: {
-      ...assistantMsg,
+      ...(assistantMsg as unknown as PersistedMessage['message']),
       trust_band: answer.trust_band ?? null,
       trust_score: answer.trust_score ?? null,
       trust_explanation: answer.trust_explanation ?? null,
+      kaynak_envanteri: answer.kaynak_envanteri ?? null,
     },
   };
 }
@@ -448,13 +460,12 @@ export async function getConversation(userId: string, conversationId: string) {
   if (convError || !conv || conv.user_id !== userId) {
     throw new NotFoundError('Sohbet bulunamadı');
   }
-  const { data: messages, error: msgError } = await supabaseAdmin
-    .from('messages')
-    .select(
-      'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating'
-    )
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: true });
+  const { data: messages, error: msgError } = await withOptionalColumn(ENVANTER_COL, (include) =>
+    supabaseAdmin
+      .from('messages')
+      .select(msgCols(include))
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true }), 'chat.getConversation');
   if (msgError) throw msgError;
 
   return {

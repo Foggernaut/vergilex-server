@@ -13,6 +13,7 @@ import {
 } from '../../utils/creditCosts.js';
 import { deductCredits } from '../credits/credits.service.js';
 import { NotFoundError } from '../../utils/errors.js';
+import { withOptionalColumn } from '../../utils/optionalColumn.js';
 
 /**
  * Mevzuat Asistanı (Opus 4.8 agentic) persistence + billing.
@@ -40,6 +41,8 @@ export interface AssistantPersistResult {
     trust_band?: string | null;
     trust_score?: number | null;
     trust_explanation?: string | null;
+    // Araştırma protokolü: kaynak envanteri (essay'deki "Taranan kaynaklar" satırının yapısal hâli).
+    kaynak_envanteri?: BrainAnswerResponse['kaynak_envanteri'] | null;
     not_found: boolean;
     credits_used: number;
     tokens_used: {
@@ -54,6 +57,13 @@ export interface AssistantPersistResult {
     feedback_rating: number | null;
   };
 }
+
+// Asistan mesaj satırı kolonları. `kaynak_envanteri` (migration 016) OPSİYONEL: ürün DB'sine
+// henüz uygulanmadıysa sorgu kolonsuz tekrar denenir (withOptionalColumn) — kayıt/geçmiş kırılmaz.
+const MSG_COLS =
+  'id, role, content, sources, conflicts, corpus_summaries, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, created_at, brain_request_id, feedback_rating';
+const ENVANTER_COL = 'kaynak_envanteri';
+const msgCols = (include: boolean): string => (include ? `${MSG_COLS}, ${ENVANTER_COL}` : MSG_COLS);
 
 function deriveTitle(query: string): string {
   const trimmed = query.trim();
@@ -79,6 +89,8 @@ function shapeMessage(
     trust_band: answer.trust_band ?? null,
     trust_score: answer.trust_score ?? null,
     trust_explanation: answer.trust_explanation ?? null,
+    // Canlı turda daima cevaptan (kolon henüz yoksa da); geçmişte kolondan gelir.
+    kaynak_envanteri: answer.kaynak_envanteri ?? null,
   };
 }
 
@@ -133,7 +145,8 @@ export async function startAssistantChat(args: {
     { conversation_id: conv.id, role: 'user', content: args.query, credits_used: 0 },
   ]);
 
-  const { data: assistantMsg, error: msgError } = await supabaseAdmin
+  const { data: assistantMsg, error: msgError } = await withOptionalColumn(ENVANTER_COL, (include) =>
+    supabaseAdmin
     .from('assistant_messages')
     .insert({
       conversation_id: conv.id,
@@ -149,17 +162,16 @@ export async function startAssistantChat(args: {
       tokens_used: tokensJsonb(answer),
       cost_usd: answer.cost.total_usd,
       answer_length: length,
+      ...(include ? { kaynak_envanteri: answer.kaynak_envanteri ?? null } : {}),
     })
-    .select(
-      'id, role, content, sources, conflicts, corpus_summaries, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, created_at, brain_request_id, feedback_rating'
-    )
-    .single();
+    .select(msgCols(include))
+    .single(), 'assistant.persistMessage');
   if (msgError || !assistantMsg) throw msgError ?? new Error('Assistant message insert failed');
 
   return {
     conversationId: conv.id,
     newBalance,
-    message: shapeMessage(assistantMsg, answer),
+    message: shapeMessage(assistantMsg as unknown as Record<string, unknown>, answer),
   };
 }
 
@@ -223,7 +235,8 @@ export async function followUpAssistant(args: {
     { conversation_id: args.conversationId, role: 'user', content: args.query, credits_used: 0 },
   ]);
 
-  const { data: assistantMsg, error: msgError } = await supabaseAdmin
+  const { data: assistantMsg, error: msgError } = await withOptionalColumn(ENVANTER_COL, (include) =>
+    supabaseAdmin
     .from('assistant_messages')
     .insert({
       conversation_id: args.conversationId,
@@ -239,11 +252,10 @@ export async function followUpAssistant(args: {
       tokens_used: tokensJsonb(answer),
       cost_usd: answer.cost.total_usd,
       answer_length: length,
+      ...(include ? { kaynak_envanteri: answer.kaynak_envanteri ?? null } : {}),
     })
-    .select(
-      'id, role, content, sources, conflicts, corpus_summaries, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, created_at, brain_request_id, feedback_rating'
-    )
-    .single();
+    .select(msgCols(include))
+    .single(), 'assistant.persistMessage');
   if (msgError || !assistantMsg) throw msgError ?? new Error('Assistant message insert failed');
 
   await supabaseAdmin
@@ -254,7 +266,7 @@ export async function followUpAssistant(args: {
   return {
     conversationId: args.conversationId,
     newBalance,
-    message: shapeMessage(assistantMsg, answer),
+    message: shapeMessage(assistantMsg as unknown as Record<string, unknown>, answer),
   };
 }
 
@@ -280,13 +292,12 @@ export async function getAssistantConversation(userId: string, conversationId: s
   if (convError || !conv || conv.user_id !== userId) {
     throw new NotFoundError('Sohbet bulunamadı');
   }
-  const { data: messages, error: msgError } = await supabaseAdmin
-    .from('assistant_messages')
-    .select(
-      'id, role, content, sources, conflicts, corpus_summaries, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, created_at, brain_request_id, feedback_rating'
-    )
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: true });
+  const { data: messages, error: msgError } = await withOptionalColumn(ENVANTER_COL, (include) =>
+    supabaseAdmin
+      .from('assistant_messages')
+      .select(msgCols(include))
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true }), 'assistant.getConversation');
   if (msgError) throw msgError;
 
   return {
