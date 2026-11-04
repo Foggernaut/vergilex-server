@@ -27,3 +27,26 @@ export async function withOptionalColumn<R extends { error: { code?: string; mes
   });
   return run(false);
 }
+
+/**
+ * `withOptionalColumn`'un birden çok sütunlu hâli: sorgu önce bütün isteğe bağlı sütunlarla denenir;
+ * eksik olan sütun düşürülüp yeniden denenir, DİĞERLERİ KORUNUR (her sütun ayrı migration'la gelir —
+ * ör. 018 envanter, 019 takip önerileri — biri eksik diye öteki kaybolmasın). Diğer hatalar aynen döner.
+ * `run` o denemede dahil edilen sütunların kümesini alır.
+ */
+export function withOptionalColumns<R extends { error: { code?: string; message?: string } | null }>(
+  columns: readonly string[],
+  run: (included: ReadonlySet<string>) => PromiseLike<R>,
+  context: string
+): Promise<R> {
+  const step = (i: number, included: ReadonlySet<string>): Promise<R> => {
+    if (i === columns.length) return Promise.resolve(run(included));
+    const column = columns[i]!;
+    return withOptionalColumn(
+      column,
+      (include) => step(i + 1, include ? new Set([...included, column]) : included),
+      context
+    );
+  };
+  return step(0, new Set());
+}

@@ -287,6 +287,16 @@ export const BrainAnswerResponseSchema = z.object({
   // facts the question left unspecified, which the client offers as one-tap
   // follow-up questions. Defaulted so legacy/v1 responses still parse.
   clarifying_questions: z.array(z.string()).default([]),
+  // Suggested follow-up questions (Sohbet only): the client shows them as tappable
+  // bubbles under the latest answer; a tap writes the question into the box, it
+  // never sends. A convenience, not part of the answer — so a missing, null or
+  // drifted value normalises to [] and can never fail the whole answer parse
+  // (`.default([])` alone would reject an explicit null).
+  suggested_followups: z
+    .array(z.string())
+    .nullish()
+    .transform((v) => v ?? [])
+    .catch([]),
   // Tek bakışta sonuç etiketi ("kesin değerlendirme" | "ihtimal" | "ek bilgi
   // gerekli" …). Bare string on purpose, same as `position_level`: the brain owns
   // this vocabulary and a new label must never make the whole response fail to
