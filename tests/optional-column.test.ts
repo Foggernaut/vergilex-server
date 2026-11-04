@@ -97,7 +97,8 @@ describe('withOptionalColumns ∘ insertWithSignals', () => {
     suggested_followups: ['Örtülü sermaye oranı nasıl hesaplanır?'],
   } as unknown as BrainAnswerResponse;
 
-  async function kos(eksik: Set<string>, hata = 'PGRST204') {
+  // `okunamaz`: hata mesajı sütun adını taşımıyor (beklenmedik PostgREST metni).
+  async function kos(eksik: Set<string>, hata = 'PGRST204', okunamaz = false) {
     const yazilan: Record<string, unknown>[] = [];
     const res = await withOptionalColumns(['kaynak_envanteri', 'suggested_followups'], (cols) =>
       insertWithSignals(
@@ -113,7 +114,8 @@ describe('withOptionalColumns ∘ insertWithSignals', () => {
         async (row) => {
           yazilan.push(row);
           const bad = Object.keys(row).find((k) => eksik.has(k));
-          return bad ? { data: null, error: { code: hata, message: bad } } : { data: { id: 'm' }, error: null };
+          const message = okunamaz ? 'Could not find a column in the schema cache' : `Could not find the '${bad}' column of 'messages' in the schema cache`;
+          return bad ? { data: null, error: { code: hata, message } } : { data: { id: 'm' }, error: null };
         }
       ), 'test');
     return { res, yazilan, son: yazilan[yazilan.length - 1]! };
@@ -128,28 +130,41 @@ describe('withOptionalColumns ∘ insertWithSignals', () => {
     expect(son.suggested_followups).toEqual(answer.suggested_followups);
   });
 
+  // Every message insert and every reload pays these round-trips until the migration lands:
+  // the missing column is dropped by NAME, so cost grows by one failed level per missing column
+  // (2 calls each — insertWithSignals retries once itself), never exponentially.
   it('only suggested_followups missing → signals and envanter still written', async () => {
-    const { res, son } = await kos(new Set(['suggested_followups']));
+    const { res, yazilan, son } = await kos(new Set(['suggested_followups']));
     expect(res.error).toBeNull();
+    expect(yazilan).toHaveLength(3);
     expect(son.trust_band).toBe('HIGH');
     expect(son.kaynak_envanteri).toBeTruthy();
     expect('suggested_followups' in son).toBe(false);
   });
 
   it('only kaynak_envanteri missing → suggestions still written', async () => {
-    const { res, son } = await kos(new Set(['kaynak_envanteri']));
+    const { res, yazilan, son } = await kos(new Set(['kaynak_envanteri']));
     expect(res.error).toBeNull();
+    expect(yazilan).toHaveLength(3);
     expect(son.trust_band).toBe('HIGH');
     expect(son.suggested_followups).toEqual(answer.suggested_followups);
     expect('kaynak_envanteri' in son).toBe(false);
   });
 
   it('both missing → signals still written', async () => {
-    const { res, son } = await kos(new Set(['kaynak_envanteri', 'suggested_followups']));
+    const { res, yazilan, son } = await kos(new Set(['kaynak_envanteri', 'suggested_followups']));
     expect(res.error).toBeNull();
+    expect(yazilan).toHaveLength(5);
     expect(son.trust_band).toBe('HIGH');
     expect('kaynak_envanteri' in son).toBe(false);
     expect('suggested_followups' in son).toBe(false);
+  });
+
+  it('an error that names no optional column drops them all at once', async () => {
+    const { res, yazilan, son } = await kos(new Set(['kaynak_envanteri', 'suggested_followups']), 'PGRST204', true);
+    expect(res.error).toBeNull();
+    expect(yazilan).toHaveLength(3);
+    expect(son.trust_band).toBe('HIGH');
   });
 
   it('does not retry on other errors', async () => {
