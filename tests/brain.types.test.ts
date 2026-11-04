@@ -340,3 +340,34 @@ describe('kaynak_envanteri', () => {
     expect(BrainBrowseDocumentsResponseSchema.parse(baseBrowse).kaynak_envanteri ?? null).toBeNull();
   });
 });
+
+// Takip sorusu önerileri: web son cevabın altında baloncuk olarak gösterir. Bir kolaylık —
+// alanın yokluğu, null'ı ya da bozuk şekli cevabın tamamını asla düşürmez.
+describe('suggested_followups', () => {
+  const baseAnswer = {
+    answer: 'cevap',
+    sources: [],
+    conflicts: [],
+    confidence_score: 0.8,
+    tokens_used: { prompt: 10, completion: 5 },
+    not_found: false,
+    secondary_legislation_note: null,
+  };
+
+  it('defaults to [] when missing or null', () => {
+    expect(BrainAnswerResponseSchema.parse(baseAnswer).suggested_followups).toEqual([]);
+    expect(BrainAnswerResponseSchema.parse({ ...baseAnswer, suggested_followups: null }).suggested_followups).toEqual([]);
+  });
+
+  it('passes the questions through', () => {
+    const q = ['Örtülü sermaye faizi gider yazılabilir mi?'];
+    expect(BrainAnswerResponseSchema.parse({ ...baseAnswer, suggested_followups: q }).suggested_followups).toEqual(q);
+  });
+
+  it('a malformed value never fails the whole answer', () => {
+    for (const bad of ['x', [1], { a: 1 }]) {
+      const r = BrainAnswerResponseSchema.safeParse({ ...baseAnswer, suggested_followups: bad });
+      expect(r.success && r.data.suggested_followups).toEqual([]);
+    }
+  });
+});
