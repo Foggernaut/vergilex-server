@@ -61,6 +61,14 @@ describe('BrainDocumentResultSchema', () => {
     expect(parsed.relevance_rationale).toContain('kıyasen');
   });
 
+  // danistay_kararlari tablosu AYM/Yargıtay/BİM kararlarını da taşır; web çip etiketini
+  // `mahkeme_turu`'ndan kurar. Şemada olmazsa zod eler → AYM kararı "DANIŞTAY KARARI" görünür.
+  it('retains mahkeme_turu through parse (optional, nullable)', () => {
+    expect(BrainDocumentResultSchema.parse({ ...baseDoc, mahkeme_turu: 'anayasa' }).mahkeme_turu).toBe('anayasa');
+    expect(BrainDocumentResultSchema.parse({ ...baseDoc, mahkeme_turu: null }).mahkeme_turu).toBeNull();
+    expect(BrainDocumentResultSchema.parse(baseDoc).mahkeme_turu).toBeUndefined();
+  });
+
   it('parses triage-less legacy sources (fields optional)', () => {
     const parsed = BrainDocumentResultSchema.parse(baseDoc);
     expect(parsed.relevance_category).toBeUndefined();

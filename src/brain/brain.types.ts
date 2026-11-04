@@ -46,6 +46,10 @@ export const BrainDocumentResultSchema = z.object({
   // Kaynağın orijinal dili ('en'/'tr'; şimdilik yalnız iham_karar doldurur).
   // Anahtar şemada olmazsa zod alanı sessizce eler — UI dil rozeti kaybolur.
   dil: z.string().nullable().optional(),
+  // Kararın gerçek mercii (danistay|anayasa|yargitay|bim_vdd|…): danistay_kararlari tablosu
+  // AYM/Yargıtay/BİM kararlarını da taşır. source_type tablo adıdır ve tam metin oradan açılır;
+  // UI çip/kaynakça etiketini bu alandan kurar. Şemada olmazsa zod eler (dil ile aynı tuzak).
+  mahkeme_turu: z.string().nullable().optional(),
   // Alaka triyajı (brain GNDO §4.4) — "dogrudan" | "cevresel". Anahtar şemada
   // olmazsa zod alanı sessizce eler ve JSONB persist'e hiç yazılmaz — ÇEVRESEL
   // rozeti kalıcı mesajlarda kaybolur. Gerekçe UI tooltip'inde gösterilir.

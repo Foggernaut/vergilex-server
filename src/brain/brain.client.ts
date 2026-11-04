@@ -1,6 +1,7 @@
 import { FormData, request } from 'undici';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
+import { sseFrames } from '../utils/sse.js';
 import {
   BrainAuthError,
   BrainError,
@@ -160,17 +161,10 @@ export class BrainClient {
     // SSE frame parser: events separated by a blank line; each event has an
     // `event:` type and one or more `data:` lines. Lines starting with ':' are
     // heartbeat comments and are ignored.
-    let buffer = '';
     try {
-      for await (const chunk of res.body) {
-        buffer += chunk.toString('utf8').replace(/\r\n/g, '\n');
-        let sep: number;
-        while ((sep = buffer.indexOf('\n\n')) !== -1) {
-          const frame = buffer.slice(0, sep);
-          buffer = buffer.slice(sep + 2);
-          const ev = this.parseSseFrame(frame);
-          if (ev) yield ev;
-        }
+      for await (const frame of sseFrames(res.body)) {
+        const ev = this.parseSseFrame(frame);
+        if (ev) yield ev;
       }
     } catch (err: unknown) {
       const error = err as { name?: string };
