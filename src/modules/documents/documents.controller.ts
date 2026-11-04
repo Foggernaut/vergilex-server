@@ -58,7 +58,12 @@ export const findDocuments: RequestHandler = async (req, res, next) => {
       user_id: req.user.id,
       query: input.query,
       search_type: 'doc_finder',
-      filters: { applied: result.applied, per_corpus_counts: result.per_corpus_counts },
+      // kaynak_envanteri: grup başlıklı tür sayaçları (araştırma protokolü Faz 5) — filters jsonb'de, migration gerekmez.
+      filters: {
+        applied: result.applied,
+        per_corpus_counts: result.per_corpus_counts,
+        kaynak_envanteri: result.kaynak_envanteri ?? null,
+      },
       results_count: result.documents.length,
     });
 

@@ -154,6 +154,26 @@ export const BrainBrowseAppliedSchema = z.object({
 });
 export type BrainBrowseApplied = z.infer<typeof BrainBrowseAppliedSchema>;
 
+// Araştırma protokolü Faz 5 — Belge Bul tür sayaçları: grup (düzenleme / denetim / yardımcı) →
+// korpus → sayı + durum. Künye modunda null. `.catch(null)`: bozuk sayaç sonuçları DÜŞÜRMEZ.
+export const BrainBrowseEnvanterSchema = z.object({
+  gruplar: z.array(
+    z.object({
+      grup: z.string(),
+      etiket: z.string(),
+      korpuslar: z.array(
+        z.object({
+          korpus: z.string(),
+          etiket: z.string(),
+          sayi: z.number().int(),
+          durum: z.string(), // bulundu | sonuc_yok | kapali | hata (yeni değer gelirse reddetme)
+        })
+      ),
+    })
+  ),
+});
+export type BrainBrowseEnvanter = z.infer<typeof BrainBrowseEnvanterSchema>;
+
 export const BrainBrowseDocumentsResponseSchema = z.object({
   documents: z.array(BrainDocumentResultSchema),
   total_found: z.number().int(),
@@ -161,6 +181,7 @@ export const BrainBrowseDocumentsResponseSchema = z.object({
   search_time_ms: z.number().int(),
   applied: BrainBrowseAppliedSchema,
   cost: BrainCostSchema.default(EMPTY_COST),
+  kaynak_envanteri: BrainBrowseEnvanterSchema.nullable().optional().catch(null),
 });
 export type BrainBrowseDocumentsResponse = z.infer<typeof BrainBrowseDocumentsResponseSchema>;
 
@@ -196,6 +217,31 @@ export const BrainCorpusSummarySchema = z.object({
   authority_level: z.number().int().default(0),
 });
 export type BrainCorpusSummary = z.infer<typeof BrainCorpusSummarySchema>;
+
+// Araştırma protokolü Faz 3/5 — kaynak envanteri: tür başına arandı / bulundu / sentezde sayımı
+// ve "neden yok" (kullanici_kisiti | korpus_kapali | kosul_saglanmadi | hata | sonuc_yok |
+// aktarimla_anildi). Cevap metnindeki "Taranan kaynaklar:" satırının yapısal hâli; mesajla saklanır.
+// `.catch(null)`: bozuk envanter cevabı DÜŞÜRMEZ (yalnız kutu görünmez, metin satırı kalır).
+export const BrainKaynakEnvanteriSchema = z.object({
+  turler: z.array(
+    z.object({
+      tur: z.string(),
+      grup: z.string(),
+      arandi: z.boolean(),
+      bulundu: z.number().int(),
+      sentez: z.number().int(),
+      en_iyi_skor: z.number().nullable().optional(),
+      neden_yok: z.string().nullable().optional(),
+      capali: z.number().int().default(0),
+      guncellik_uyari: z.number().int().default(0),
+    })
+  ),
+  atlandi: z.boolean().default(false),
+  celiski: z.boolean().default(false),
+  // Tebliğ bulunamadığında "hangi genel tebliğe bakılmalı" yönlendirmesi (metin satırındaki "(ilgili: …)").
+  kontrol_tebligleri: z.array(z.string()).default([]),
+});
+export type BrainKaynakEnvanteri = z.infer<typeof BrainKaynakEnvanteriSchema>;
 
 export const BrainAnswerResponseSchema = z.object({
   answer: z.string(),
@@ -241,6 +287,16 @@ export const BrainAnswerResponseSchema = z.object({
   // facts the question left unspecified, which the client offers as one-tap
   // follow-up questions. Defaulted so legacy/v1 responses still parse.
   clarifying_questions: z.array(z.string()).default([]),
+  // Suggested follow-up questions (Sohbet only): the client shows them as tappable
+  // bubbles under the latest answer; a tap writes the question into the box, it
+  // never sends. A convenience, not part of the answer — so a missing, null or
+  // drifted value normalises to [] and can never fail the whole answer parse
+  // (`.default([])` alone would reject an explicit null).
+  suggested_followups: z
+    .array(z.string())
+    .nullish()
+    .transform((v) => v ?? [])
+    .catch([]),
   // Tek bakışta sonuç etiketi ("kesin değerlendirme" | "ihtimal" | "ek bilgi
   // gerekli" …). Bare string on purpose, same as `position_level`: the brain owns
   // this vocabulary and a new label must never make the whole response fail to
@@ -258,6 +314,7 @@ export const BrainAnswerResponseSchema = z.object({
   // here onward. Optional/nullable: legacy v1 path doesn't carry it.
   context_reset: z.boolean().nullable().optional(),
   context_mode: z.string().nullable().optional(), // followup | new_context
+  kaynak_envanteri: BrainKaynakEnvanteriSchema.nullable().optional().catch(null),
 });
 export type BrainAnswerResponse = z.infer<typeof BrainAnswerResponseSchema>;
 

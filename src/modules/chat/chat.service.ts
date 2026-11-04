@@ -21,6 +21,7 @@ import {
   selectWithSignals,
 } from '../../utils/answerSignals.js';
 import { logger } from '../../config/logger.js';
+import { withOptionalColumns } from '../../utils/optionalColumn.js';
 
 const MAX_HISTORY_TURNS = 6;
 const TITLE_MAX = 80;
@@ -107,6 +108,17 @@ export async function recordSearchHistory(row: {
   }
 }
 
+// Mesaj satırı kolonları. `kaynak_envanteri` (migration 018) ve `suggested_followups` (019, takip sorusu
+// önerileri) OPSİYONEL: ürün DB'sine henüz uygulanmadıysa sorgu yalnız eksik kolonsuz tekrar denenir
+// (withOptionalColumns) — kayıt/geçmiş kırılmaz, diğer kolon ve cevap sinyalleri korunur.
+const MSG_COLS =
+  'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating';
+const ENVANTER_COL = 'kaynak_envanteri';
+const TAKIP_COL = 'suggested_followups';
+const OPTIONAL_COLS = [ENVANTER_COL, TAKIP_COL] as const;
+const msgCols = (cols: ReadonlySet<string>): string =>
+  [MSG_COLS, ...OPTIONAL_COLS.filter((c) => cols.has(c))].join(', ');
+
 interface PersistedMessage {
   conversationId: string;
   newBalance: number;
@@ -123,6 +135,9 @@ interface PersistedMessage {
     trust_band?: string | null;
     trust_score?: number | null;
     trust_explanation?: string | null;
+    // Araştırma protokolü: kaynak envanteri (cevaptaki "Taranan kaynaklar" satırının yapısal hâli).
+    kaynak_envanteri?: BrainAnswerResponse['kaynak_envanteri'] | null;
+    suggested_followups?: string[] | null;
     position_level?: string | null;
     position_score?: number | null;
     position_rationale?: string | null;
@@ -244,7 +259,8 @@ export async function startConversation(args: {
   // Answer signals ride along with the row; `insertWithSignals` retries without
   // them if migration 016 hasn't reached this database yet, so an already-billed
   // turn can never be lost to migration state.
-  const { data: assistantMsg, error: msgError } = await insertWithSignals(
+  const { data: assistantMsg, error: msgError } = await withOptionalColumns(OPTIONAL_COLS, (cols) =>
+    insertWithSignals(
     {
       table: 'messages',
       answer,
@@ -262,17 +278,20 @@ export async function startConversation(args: {
         cost_usd: answer.cost.total_usd,
         answer_length: length,
         engine,
+        ...(cols.has(ENVANTER_COL) ? { kaynak_envanteri: answer.kaynak_envanteri ?? null } : {}),
+        // Boş öneri listesi NULL saklanır (clarifying_questions gibi): "öneri yok" = "kaydedilmedi".
+        ...(cols.has(TAKIP_COL)
+          ? { suggested_followups: answer.suggested_followups.length ? answer.suggested_followups : null }
+          : {}),
       },
     },
     (row) =>
       supabaseAdmin
         .from('messages')
         .insert(row)
-        .select(
-          'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating'
-        )
+        .select(msgCols(cols))
         .single()
-  );
+  ), 'chat.persistMessage');
   if (msgError || !assistantMsg) throw msgError ?? new Error('Message insert failed');
 
   await recordSearchHistory({
@@ -290,8 +309,10 @@ export async function startConversation(args: {
     // Merge the brain's answer signals in-memory so this turn shows them even if
     // the row couldn't carry them (migration 016 not yet applied).
     message: {
-      ...(assistantMsg as PersistedMessage['message']),
+      ...(assistantMsg as unknown as PersistedMessage['message']),
       ...answerSignalFields(answer),
+      kaynak_envanteri: answer.kaynak_envanteri ?? null,
+      suggested_followups: answer.suggested_followups,
     },
   };
 }
@@ -394,7 +415,8 @@ export async function followUp(args: {
   // Answer signals ride along with the row; `insertWithSignals` retries without
   // them if migration 016 hasn't reached this database yet, so an already-billed
   // turn can never be lost to migration state.
-  const { data: assistantMsg, error: msgError } = await insertWithSignals(
+  const { data: assistantMsg, error: msgError } = await withOptionalColumns(OPTIONAL_COLS, (cols) =>
+    insertWithSignals(
     {
       table: 'messages',
       answer,
@@ -412,17 +434,20 @@ export async function followUp(args: {
         cost_usd: answer.cost.total_usd,
         answer_length: length,
         engine,
+        ...(cols.has(ENVANTER_COL) ? { kaynak_envanteri: answer.kaynak_envanteri ?? null } : {}),
+        // Boş öneri listesi NULL saklanır (clarifying_questions gibi): "öneri yok" = "kaydedilmedi".
+        ...(cols.has(TAKIP_COL)
+          ? { suggested_followups: answer.suggested_followups.length ? answer.suggested_followups : null }
+          : {}),
       },
     },
     (row) =>
       supabaseAdmin
         .from('messages')
         .insert(row)
-        .select(
-          'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating'
-        )
+        .select(msgCols(cols))
         .single()
-  );
+  ), 'chat.persistMessage');
   if (msgError || !assistantMsg) throw msgError ?? new Error('Message insert failed');
 
   await supabaseAdmin
@@ -445,8 +470,10 @@ export async function followUp(args: {
     // Merge the brain's answer signals in-memory so this turn shows them even if
     // the row couldn't carry them (migration 016 not yet applied).
     message: {
-      ...(assistantMsg as PersistedMessage['message']),
+      ...(assistantMsg as unknown as PersistedMessage['message']),
       ...answerSignalFields(answer),
+      kaynak_envanteri: answer.kaynak_envanteri ?? null,
+      suggested_followups: answer.suggested_followups,
     },
   };
 }
@@ -475,15 +502,16 @@ export async function getConversation(userId: string, conversationId: string) {
   }
   // Signals come back on a history reload too, so an old conversation shows the
   // same trust / position / degradation vitals it showed when it was answered.
-  const { data: messages, error: msgError } = await selectWithSignals(
-    'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating',
+  const { data: messages, error: msgError } = await withOptionalColumns(OPTIONAL_COLS, (cols) =>
+    selectWithSignals(
+    msgCols(cols),
     (select) =>
       supabaseAdmin
         .from('messages')
         .select(select)
         .eq('conversation_id', conversationId)
         .order('created_at', { ascending: true })
-  );
+  ), 'chat.getConversation');
   if (msgError) throw msgError;
 
   return {
