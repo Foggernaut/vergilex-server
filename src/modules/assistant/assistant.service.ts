@@ -13,6 +13,12 @@ import {
 } from '../../utils/creditCosts.js';
 import { deductCredits } from '../credits/credits.service.js';
 import { NotFoundError } from '../../utils/errors.js';
+import { withOptionalColumn } from '../../utils/optionalColumn.js';
+import {
+  answerSignalFields,
+  insertWithSignals,
+  selectWithSignals,
+} from '../../utils/answerSignals.js';
 
 /**
  * Mevzuat Asistanı (Opus 4.8 agentic) persistence + billing.
@@ -37,9 +43,22 @@ export interface AssistantPersistResult {
     conflicts: BrainAnswerResponse['conflicts'];
     corpus_summaries: BrainAnswerResponse['corpus_summaries'] | null;
     confidence_score: number;
+    // Per-answer quality signals (see utils/answerSignals.ts): grounding (trust),
+    // defensibility (position), graceful degradation, and the machine-readable
+    // EKSİK BİLGİ list.
     trust_band?: string | null;
     trust_score?: number | null;
     trust_explanation?: string | null;
+    // Araştırma protokolü: kaynak envanteri (essay'deki "Taranan kaynaklar" satırının yapısal hâli).
+    kaynak_envanteri?: BrainAnswerResponse['kaynak_envanteri'] | null;
+    position_level?: string | null;
+    position_score?: number | null;
+    position_rationale?: string | null;
+    degraded?: boolean;
+    degradation_reason?: string | null;
+    degradation_note?: string | null;
+    clarifying_questions?: string[];
+    sonuc_durumu?: string | null;
     not_found: boolean;
     credits_used: number;
     tokens_used: {
@@ -55,6 +74,13 @@ export interface AssistantPersistResult {
   };
 }
 
+// Asistan mesaj satırı kolonları. `kaynak_envanteri` (migration 016) OPSİYONEL: ürün DB'sine
+// henüz uygulanmadıysa sorgu kolonsuz tekrar denenir (withOptionalColumn) — kayıt/geçmiş kırılmaz.
+const MSG_COLS =
+  'id, role, content, sources, conflicts, corpus_summaries, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, created_at, brain_request_id, feedback_rating';
+const ENVANTER_COL = 'kaynak_envanteri';
+const msgCols = (include: boolean): string => (include ? `${MSG_COLS}, ${ENVANTER_COL}` : MSG_COLS);
+
 function deriveTitle(query: string): string {
   const trimmed = query.trim();
   if (trimmed.length <= TITLE_MAX) return trimmed;
@@ -69,16 +95,20 @@ function tokensJsonb(answer: BrainAnswerResponse) {
   };
 }
 
-/** Shape the persisted assistant message + merge the brain's in-memory trust signal. */
+/**
+ * Shape the persisted assistant message, merging the brain's answer signals in
+ * from memory. This is what makes the live turn correct even when the row itself
+ * couldn't carry the signal columns (migration 016 not yet applied).
+ */
 function shapeMessage(
   assistantMsg: Record<string, unknown>,
   answer: BrainAnswerResponse
 ): AssistantPersistResult['message'] {
   return {
     ...(assistantMsg as AssistantPersistResult['message']),
-    trust_band: answer.trust_band ?? null,
-    trust_score: answer.trust_score ?? null,
-    trust_explanation: answer.trust_explanation ?? null,
+    ...answerSignalFields(answer),
+    // Canlı turda daima cevaptan (kolon henüz yoksa da); geçmişte kolondan gelir.
+    kaynak_envanteri: answer.kaynak_envanteri ?? null,
   };
 }
 
@@ -133,33 +163,44 @@ export async function startAssistantChat(args: {
     { conversation_id: conv.id, role: 'user', content: args.query, credits_used: 0 },
   ]);
 
-  const { data: assistantMsg, error: msgError } = await supabaseAdmin
-    .from('assistant_messages')
-    .insert({
-      conversation_id: conv.id,
-      role: 'assistant',
-      content: answer.answer,
-      sources: answer.sources,
-      conflicts: answer.conflicts,
-      corpus_summaries: answer.corpus_summaries,
-      confidence_score: answer.confidence_score,
-      not_found: answer.not_found,
-      brain_request_id: answer.request_id ?? null,
-      credits_used: cost,
-      tokens_used: tokensJsonb(answer),
-      cost_usd: answer.cost.total_usd,
-      answer_length: length,
-    })
-    .select(
-      'id, role, content, sources, conflicts, corpus_summaries, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, created_at, brain_request_id, feedback_rating'
-    )
-    .single();
+  // `insertWithSignals` retries without the signal columns if migration 016
+  // hasn't reached this database yet — an already-billed turn must never be lost
+  // to migration state.
+  const { data: assistantMsg, error: msgError } = await withOptionalColumn(ENVANTER_COL, (include) =>
+    insertWithSignals(
+    {
+      table: 'assistant_messages',
+      answer,
+      row: {
+        conversation_id: conv.id,
+        role: 'assistant',
+        content: answer.answer,
+        sources: answer.sources,
+        conflicts: answer.conflicts,
+        corpus_summaries: answer.corpus_summaries,
+        confidence_score: answer.confidence_score,
+        not_found: answer.not_found,
+        brain_request_id: answer.request_id ?? null,
+        credits_used: cost,
+        tokens_used: tokensJsonb(answer),
+        cost_usd: answer.cost.total_usd,
+        answer_length: length,
+        ...(include ? { kaynak_envanteri: answer.kaynak_envanteri ?? null } : {}),
+      },
+    },
+    (row) =>
+      supabaseAdmin
+        .from('assistant_messages')
+        .insert(row)
+        .select(msgCols(include))
+        .single()
+  ), 'assistant.persistMessage');
   if (msgError || !assistantMsg) throw msgError ?? new Error('Assistant message insert failed');
 
   return {
     conversationId: conv.id,
     newBalance,
-    message: shapeMessage(assistantMsg, answer),
+    message: shapeMessage(assistantMsg as unknown as Record<string, unknown>, answer),
   };
 }
 
@@ -223,27 +264,38 @@ export async function followUpAssistant(args: {
     { conversation_id: args.conversationId, role: 'user', content: args.query, credits_used: 0 },
   ]);
 
-  const { data: assistantMsg, error: msgError } = await supabaseAdmin
-    .from('assistant_messages')
-    .insert({
-      conversation_id: args.conversationId,
-      role: 'assistant',
-      content: answer.answer,
-      sources: answer.sources,
-      conflicts: answer.conflicts,
-      corpus_summaries: answer.corpus_summaries,
-      confidence_score: answer.confidence_score,
-      not_found: answer.not_found,
-      brain_request_id: answer.request_id ?? null,
-      credits_used: cost,
-      tokens_used: tokensJsonb(answer),
-      cost_usd: answer.cost.total_usd,
-      answer_length: length,
-    })
-    .select(
-      'id, role, content, sources, conflicts, corpus_summaries, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, created_at, brain_request_id, feedback_rating'
-    )
-    .single();
+  // `insertWithSignals` retries without the signal columns if migration 016
+  // hasn't reached this database yet — an already-billed turn must never be lost
+  // to migration state.
+  const { data: assistantMsg, error: msgError } = await withOptionalColumn(ENVANTER_COL, (include) =>
+    insertWithSignals(
+    {
+      table: 'assistant_messages',
+      answer,
+      row: {
+        conversation_id: args.conversationId,
+        role: 'assistant',
+        content: answer.answer,
+        sources: answer.sources,
+        conflicts: answer.conflicts,
+        corpus_summaries: answer.corpus_summaries,
+        confidence_score: answer.confidence_score,
+        not_found: answer.not_found,
+        brain_request_id: answer.request_id ?? null,
+        credits_used: cost,
+        tokens_used: tokensJsonb(answer),
+        cost_usd: answer.cost.total_usd,
+        answer_length: length,
+        ...(include ? { kaynak_envanteri: answer.kaynak_envanteri ?? null } : {}),
+      },
+    },
+    (row) =>
+      supabaseAdmin
+        .from('assistant_messages')
+        .insert(row)
+        .select(msgCols(include))
+        .single()
+  ), 'assistant.persistMessage');
   if (msgError || !assistantMsg) throw msgError ?? new Error('Assistant message insert failed');
 
   await supabaseAdmin
@@ -254,7 +306,7 @@ export async function followUpAssistant(args: {
   return {
     conversationId: args.conversationId,
     newBalance,
-    message: shapeMessage(assistantMsg, answer),
+    message: shapeMessage(assistantMsg as unknown as Record<string, unknown>, answer),
   };
 }
 
@@ -280,13 +332,18 @@ export async function getAssistantConversation(userId: string, conversationId: s
   if (convError || !conv || conv.user_id !== userId) {
     throw new NotFoundError('Sohbet bulunamadı');
   }
-  const { data: messages, error: msgError } = await supabaseAdmin
-    .from('assistant_messages')
-    .select(
-      'id, role, content, sources, conflicts, corpus_summaries, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, created_at, brain_request_id, feedback_rating'
-    )
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: true });
+  // Signals come back on a history reload too, so reopening an old assistant
+  // thread shows the same trust / position / degradation vitals it was answered with.
+  const { data: messages, error: msgError } = await withOptionalColumn(ENVANTER_COL, (include) =>
+    selectWithSignals(
+    msgCols(include),
+    (select) =>
+      supabaseAdmin
+        .from('assistant_messages')
+        .select(select)
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true })
+  ), 'assistant.getConversation');
   if (msgError) throw msgError;
 
   return {

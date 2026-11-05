@@ -15,6 +15,7 @@ import {
   streamAssistantChat,
   streamAssistantFollowUp,
 } from './assistant.stream.service.js';
+import { MAX_QUERY_CHARS, MIN_QUERY_CHARS } from '../../utils/queryLimits.js';
 
 // ── Buffered ────────────────────────────────────────────────────────────────
 
@@ -86,7 +87,7 @@ export const createAssistantChatStream: RequestHandler = async (req, res, next) 
 // only, so it is not written to our logs).
 const assistantStreamQuerySchema = z.object({
   access_token: z.string().min(10),
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   answer_length: z.enum(['short', 'medium', 'long']).optional(),
   // comma-separated corpus keys
   corpora: z.string().optional(),

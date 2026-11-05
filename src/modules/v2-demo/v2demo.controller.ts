@@ -5,15 +5,16 @@ import { AppError, AuthError } from '../../utils/errors.js';
 import { followUp, recordSearchHistory, startConversation } from '../chat/chat.service.js';
 import { streamConversation, streamFollowUp } from '../chat/chat.stream.service.js';
 import { SseWriter } from '../../utils/sse.js';
+import { MAX_QUERY_CHARS, MIN_QUERY_CHARS } from '../../utils/queryLimits.js';
 
 const newV2ChatSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   filters: z.object({ law_id: z.string().nullable().optional() }).optional(),
   answer_length: z.enum(['short', 'medium', 'long']).optional(),
 });
 
 const v2FollowUpSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   answer_length: z.enum(['short', 'medium', 'long']).optional(),
 });
 
@@ -124,7 +125,15 @@ export const analyzeDocument: RequestHandler = async (req, res, next) => {
         'Sadece PDF veya düz metin dosyaları desteklenir'
       );
     }
-    const query = typeof req.body?.query === 'string' ? req.body.query.slice(0, 1000) : undefined;
+    const rawQuery = typeof req.body?.query === 'string' ? req.body.query.trim() : undefined;
+    if (rawQuery && rawQuery.length > MAX_QUERY_CHARS) {
+      throw new AppError(
+        400,
+        'QUERY_TOO_LONG',
+        `Soru en fazla ${MAX_QUERY_CHARS} karakter olabilir`
+      );
+    }
+    const query = rawQuery || undefined;
 
     const result = await brainClient.analyzeDocument({
       file: file.buffer,

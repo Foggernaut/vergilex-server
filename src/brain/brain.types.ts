@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_QUERY_CHARS, MIN_QUERY_CHARS } from '../utils/queryLimits.js';
 
 // Mirrors mevzuat-knowledge-api v2 Pydantic models.
 
@@ -45,6 +46,10 @@ export const BrainDocumentResultSchema = z.object({
   // Kaynağın orijinal dili ('en'/'tr'; şimdilik yalnız iham_karar doldurur).
   // Anahtar şemada olmazsa zod alanı sessizce eler — UI dil rozeti kaybolur.
   dil: z.string().nullable().optional(),
+  // Kararın gerçek mercii (danistay|anayasa|yargitay|bim_vdd|…): danistay_kararlari tablosu
+  // AYM/Yargıtay/BİM kararlarını da taşır. source_type tablo adıdır ve tam metin oradan açılır;
+  // UI çip/kaynakça etiketini bu alandan kurar. Şemada olmazsa zod eler (dil ile aynı tuzak).
+  mahkeme_turu: z.string().nullable().optional(),
   // Alaka triyajı (brain GNDO §4.4) — "dogrudan" | "cevresel". Anahtar şemada
   // olmazsa zod alanı sessizce eler ve JSONB persist'e hiç yazılmaz — ÇEVRESEL
   // rozeti kalıcı mesajlarda kaybolur. Gerekçe UI tooltip'inde gösterilir.
@@ -94,7 +99,7 @@ export const BrainFiltersSchema = z
   .optional();
 
 export const BrainFindDocumentsRequestSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   filters: BrainFiltersSchema,
   limit: z.number().int().min(1).max(50).optional().default(20),
 });
@@ -127,7 +132,7 @@ export const BrainBrowseFiltersSchema = z.object({
 export type BrainBrowseFilters = z.infer<typeof BrainBrowseFiltersSchema>;
 
 export const BrainBrowseDocumentsRequestSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   filters: BrainBrowseFiltersSchema.optional(),
   // Candidate chunks pulled per corpus BEFORE parent-dedupe (1..200).
   per_corpus: z.number().int().min(1).max(200).optional(),
@@ -153,6 +158,26 @@ export const BrainBrowseAppliedSchema = z.object({
 });
 export type BrainBrowseApplied = z.infer<typeof BrainBrowseAppliedSchema>;
 
+// Araştırma protokolü Faz 5 — Belge Bul tür sayaçları: grup (düzenleme / denetim / yardımcı) →
+// korpus → sayı + durum. Künye modunda null. `.catch(null)`: bozuk sayaç sonuçları DÜŞÜRMEZ.
+export const BrainBrowseEnvanterSchema = z.object({
+  gruplar: z.array(
+    z.object({
+      grup: z.string(),
+      etiket: z.string(),
+      korpuslar: z.array(
+        z.object({
+          korpus: z.string(),
+          etiket: z.string(),
+          sayi: z.number().int(),
+          durum: z.string(), // bulundu | sonuc_yok | kapali | hata (yeni değer gelirse reddetme)
+        })
+      ),
+    })
+  ),
+});
+export type BrainBrowseEnvanter = z.infer<typeof BrainBrowseEnvanterSchema>;
+
 export const BrainBrowseDocumentsResponseSchema = z.object({
   documents: z.array(BrainDocumentResultSchema),
   total_found: z.number().int(),
@@ -160,6 +185,7 @@ export const BrainBrowseDocumentsResponseSchema = z.object({
   search_time_ms: z.number().int(),
   applied: BrainBrowseAppliedSchema,
   cost: BrainCostSchema.default(EMPTY_COST),
+  kaynak_envanteri: BrainBrowseEnvanterSchema.nullable().optional().catch(null),
 });
 export type BrainBrowseDocumentsResponse = z.infer<typeof BrainBrowseDocumentsResponseSchema>;
 
@@ -170,7 +196,7 @@ export const BrainHistoryItemSchema = z.object({
 export type BrainHistoryItem = z.infer<typeof BrainHistoryItemSchema>;
 
 export const BrainAnswerRequestSchema = z.object({
-  query: z.string().min(2).max(1000),
+  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
   filters: BrainFiltersSchema,
   history: z.array(BrainHistoryItemSchema).optional(),
   answer_length: AnswerLengthSchema.optional(),
@@ -196,6 +222,31 @@ export const BrainCorpusSummarySchema = z.object({
 });
 export type BrainCorpusSummary = z.infer<typeof BrainCorpusSummarySchema>;
 
+// Araştırma protokolü Faz 3/5 — kaynak envanteri: tür başına arandı / bulundu / sentezde sayımı
+// ve "neden yok" (kullanici_kisiti | korpus_kapali | kosul_saglanmadi | hata | sonuc_yok |
+// aktarimla_anildi). Cevap metnindeki "Taranan kaynaklar:" satırının yapısal hâli; mesajla saklanır.
+// `.catch(null)`: bozuk envanter cevabı DÜŞÜRMEZ (yalnız kutu görünmez, metin satırı kalır).
+export const BrainKaynakEnvanteriSchema = z.object({
+  turler: z.array(
+    z.object({
+      tur: z.string(),
+      grup: z.string(),
+      arandi: z.boolean(),
+      bulundu: z.number().int(),
+      sentez: z.number().int(),
+      en_iyi_skor: z.number().nullable().optional(),
+      neden_yok: z.string().nullable().optional(),
+      capali: z.number().int().default(0),
+      guncellik_uyari: z.number().int().default(0),
+    })
+  ),
+  atlandi: z.boolean().default(false),
+  celiski: z.boolean().default(false),
+  // Tebliğ bulunamadığında "hangi genel tebliğe bakılmalı" yönlendirmesi (metin satırındaki "(ilgili: …)").
+  kontrol_tebligleri: z.array(z.string()).default([]),
+});
+export type BrainKaynakEnvanteri = z.infer<typeof BrainKaynakEnvanteriSchema>;
+
 export const BrainAnswerResponseSchema = z.object({
   answer: z.string(),
   sources: z.array(BrainDocumentResultSchema),
@@ -220,12 +271,54 @@ export const BrainAnswerResponseSchema = z.object({
   trust_band: z.string().nullable().optional(),
   trust_score: z.number().nullable().optional(),
   trust_explanation: z.string().nullable().optional(),
+  // Pozisyon gücü — a SEPARATE axis from trust. trust = "how well grounded is
+  // this answer in its sources"; position = "how defensible is this position
+  // against the idare / yargı" (source authority + conflicts). A well-grounded
+  // answer can still be an aggressive position, so the client shows both.
+  // `position_level` is deliberately a bare string, not an enum: the brain owns
+  // that vocabulary (güçlü | savunulabilir | agresif | ihtilaflı) and adding a
+  // grade there must never make the whole response fail to parse.
+  position_level: z.string().nullable().optional(),
+  position_score: z.number().nullable().optional(),
+  position_rationale: z.string().nullable().optional(),
+  // Dereceli teslim: a blocking güvence gate stripped the unverifiable sentences
+  // instead of dropping the whole answer. `degradation_note` is ALREADY appended
+  // to `answer` as markdown; these fields let the client also render a banner.
+  degraded: z.boolean().nullable().optional(),
+  degradation_reason: z.string().nullable().optional(),
+  degradation_note: z.string().nullable().optional(),
+  // Machine-readable form of the answer's EKSİK BİLGİ section: dispositive party
+  // facts the question left unspecified, which the client offers as one-tap
+  // follow-up questions. Defaulted so legacy/v1 responses still parse.
+  clarifying_questions: z.array(z.string()).default([]),
+  // Suggested follow-up questions (Sohbet only): the client shows them as tappable
+  // bubbles under the latest answer; a tap writes the question into the box, it
+  // never sends. A convenience, not part of the answer — so a missing, null or
+  // drifted value normalises to [] and can never fail the whole answer parse
+  // (`.default([])` alone would reject an explicit null).
+  suggested_followups: z
+    .array(z.string())
+    .nullish()
+    .transform((v) => v ?? [])
+    .catch([]),
+  // Tek bakışta sonuç etiketi ("kesin değerlendirme" | "ihtimal" | "ek bilgi
+  // gerekli" …). Bare string on purpose, same as `position_level`: the brain owns
+  // this vocabulary and a new label must never make the whole response fail to
+  // parse. Forwarded to the client and persisted (migration 017).
+  sonuc_durumu: z.string().nullable().optional(),
+  // Structured tax-calculation result (tax-assessment questions only). Its
+  // human-readable breakdown is ALREADY appended to `answer` as markdown, so it
+  // is neither persisted nor forwarded today; it stays in the schema so zod does
+  // not strip it and a future UI can use it. `.catch(null)`: an unused field must
+  // never fail the whole answer parse if its shape ever drifts.
+  hesap: z.record(z.unknown()).nullable().optional().catch(null),
   // takip-tespit: true iff the brain classified THIS turn as a new topic (not a
   // continuation) and ignored prior history. We persist this as a context
   // boundary on the new user message so future turns load history only from
   // here onward. Optional/nullable: legacy v1 path doesn't carry it.
   context_reset: z.boolean().nullable().optional(),
   context_mode: z.string().nullable().optional(), // followup | new_context
+  kaynak_envanteri: BrainKaynakEnvanteriSchema.nullable().optional().catch(null),
 });
 export type BrainAnswerResponse = z.infer<typeof BrainAnswerResponseSchema>;
 

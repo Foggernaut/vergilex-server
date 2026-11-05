@@ -49,3 +49,24 @@ export class SseWriter {
     return this.closed || this.res.writableEnded;
   }
 }
+
+/**
+ * Bir SSE bayt akışını çerçevelere böler: olaylar boş satırla ayrılır; `\r\n` → `\n`.
+ * Son boş satırı gelmemiş yarım çerçeve yayılmaz (akış kesildiyse olay da yoktur).
+ * Çözme TEK bir akış-kipli TextDecoder ile yapılır — ağ parçası sınırı çok-baytlı bir
+ * UTF-8 harfinin (ı, ş, ğ…) ortasına düştüğünde harf bir sonraki parçayla birleşir;
+ * parça başına `toString('utf8')` onu iki U+FFFD'ye çevirirdi ("davac��").
+ */
+export async function* sseFrames(chunks: AsyncIterable<Uint8Array | string>): AsyncGenerator<string> {
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  for await (const chunk of chunks) {
+    buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+    buffer = buffer.replace(/\r\n/g, '\n');
+    let sep: number;
+    while ((sep = buffer.indexOf('\n\n')) !== -1) {
+      yield buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+    }
+  }
+}

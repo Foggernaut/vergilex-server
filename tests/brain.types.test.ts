@@ -3,6 +3,7 @@ import {
   BrainDocumentResultSchema,
   BrainFindDocumentsResponseSchema,
   BrainAnswerResponseSchema,
+  BrainBrowseDocumentsResponseSchema,
   KNOWN_SOURCE_TYPES,
 } from '../src/brain/brain.types.js';
 
@@ -58,6 +59,14 @@ describe('BrainDocumentResultSchema', () => {
     });
     expect(parsed.relevance_category).toBe('cevresel');
     expect(parsed.relevance_rationale).toContain('kıyasen');
+  });
+
+  // danistay_kararlari tablosu AYM/Yargıtay/BİM kararlarını da taşır; web çip etiketini
+  // `mahkeme_turu`'ndan kurar. Şemada olmazsa zod eler → AYM kararı "DANIŞTAY KARARI" görünür.
+  it('retains mahkeme_turu through parse (optional, nullable)', () => {
+    expect(BrainDocumentResultSchema.parse({ ...baseDoc, mahkeme_turu: 'anayasa' }).mahkeme_turu).toBe('anayasa');
+    expect(BrainDocumentResultSchema.parse({ ...baseDoc, mahkeme_turu: null }).mahkeme_turu).toBeNull();
+    expect(BrainDocumentResultSchema.parse(baseDoc).mahkeme_turu).toBeUndefined();
   });
 
   it('parses triage-less legacy sources (fields optional)', () => {
@@ -127,5 +136,246 @@ describe('response schemas carry new source types', () => {
       secondary_legislation_note: null,
     });
     expect(parsed.success).toBe(true);
+  });
+});
+
+// --- Answer signals (trust / position / degradation / clarifying) ------------
+// These ride on the SAME response as the answer text and are what the client
+// renders as the answer's vitals. Two failure modes are pinned here: a missing
+// field must not make the whole response unparseable (legacy v1 has none of
+// them), and a present field must not be silently stripped — zod drops unknown
+// keys, which is exactly how the position/degradation signals went unused before.
+describe('BrainAnswerResponseSchema — answer signals', () => {
+  const baseAnswer = {
+    answer: 'cevap',
+    sources: [baseDoc],
+    conflicts: [],
+    confidence_score: 0.8,
+    tokens_used: { prompt: 10, completion: 5 },
+    not_found: false,
+    secondary_legislation_note: null,
+  };
+
+  it('retains position / degradation / clarifying fields through parse', () => {
+    const parsed = BrainAnswerResponseSchema.parse({
+      ...baseAnswer,
+      trust_band: 'MEDIUM',
+      trust_score: 0.61,
+      trust_explanation: 'dayanak orta',
+      position_level: 'savunulabilir',
+      position_score: 0.55,
+      position_rationale: 'daire kararı var, VDDK yok',
+      degraded: true,
+      degradation_reason: 'unfaithful_citation',
+      degradation_note: 'Doğrulanamayan ifadeler çıkarıldı.',
+      clarifying_questions: ['Şirket tam mükellef mi?'],
+    });
+    expect(parsed.position_level).toBe('savunulabilir');
+    expect(parsed.position_score).toBe(0.55);
+    expect(parsed.position_rationale).toContain('VDDK');
+    expect(parsed.degraded).toBe(true);
+    expect(parsed.degradation_reason).toBe('unfaithful_citation');
+    expect(parsed.degradation_note).toContain('çıkarıldı');
+    expect(parsed.clarifying_questions).toEqual(['Şirket tam mükellef mi?']);
+  });
+
+  // sonuc_durumu is a bare string on purpose (the brain owns the vocabulary), and
+  // hesap is the structured tax-calculation result — both must survive the parse
+  // rather than be stripped, and both are absent on non-tax / legacy responses.
+  it('retains sonuc_durumu and hesap through parse', () => {
+    const parsed = BrainAnswerResponseSchema.parse({
+      ...baseAnswer,
+      sonuc_durumu: 'kesin değerlendirme',
+      hesap: { matrah: 1000, oran: 0.2, toplam: 200 },
+    });
+    expect(parsed.sonuc_durumu).toBe('kesin değerlendirme');
+    expect(parsed.hesap).toEqual({ matrah: 1000, oran: 0.2, toplam: 200 });
+  });
+
+  it('parses with sonuc_durumu and hesap omitted', () => {
+    const parsed = BrainAnswerResponseSchema.parse(baseAnswer);
+    expect(parsed.sonuc_durumu).toBeUndefined();
+    expect(parsed.hesap).toBeUndefined();
+  });
+
+  it('accepts explicit nulls for sonuc_durumu and hesap (FastAPI wire shape)', () => {
+    const parsed = BrainAnswerResponseSchema.parse({
+      ...baseAnswer,
+      sonuc_durumu: null,
+      hesap: null,
+    });
+    expect(parsed.sonuc_durumu).toBeNull();
+    expect(parsed.hesap).toBeNull();
+  });
+
+  it('a malformed hesap degrades to null instead of failing the answer', () => {
+    const parsed = BrainAnswerResponseSchema.safeParse({
+      ...baseAnswer,
+      hesap: [{ kalem: 'vergi farkı' }],
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.hesap).toBeNull();
+  });
+
+  it('accepts an unknown future sonuc_durumu label', () => {
+    const parsed = BrainAnswerResponseSchema.safeParse({
+      ...baseAnswer,
+      sonuc_durumu: 'yeni bir etiket',
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('defaults clarifying_questions to [] when the brain omits it', () => {
+    const parsed = BrainAnswerResponseSchema.parse(baseAnswer);
+    expect(parsed.clarifying_questions).toEqual([]);
+  });
+
+  it('parses a legacy v1 response carrying no signals at all', () => {
+    const parsed = BrainAnswerResponseSchema.safeParse(baseAnswer);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('accepts explicit nulls for every signal (FastAPI wire shape)', () => {
+    const parsed = BrainAnswerResponseSchema.parse({
+      ...baseAnswer,
+      trust_band: null,
+      trust_score: null,
+      trust_explanation: null,
+      position_level: null,
+      position_score: null,
+      position_rationale: null,
+      degraded: null,
+      degradation_reason: null,
+      degradation_note: null,
+    });
+    expect(parsed.position_level).toBeNull();
+    expect(parsed.degraded).toBeNull();
+  });
+
+  // position_level is a bare string on purpose: the brain owns that vocabulary
+  // (services/position_strength.py). A new grade there must not make the whole
+  // answer fail to parse — same permissive contract as source_type.
+  it('accepts an unknown future position_level', () => {
+    const parsed = BrainAnswerResponseSchema.safeParse({
+      ...baseAnswer,
+      position_level: 'çok agresif',
+    });
+    expect(parsed.success).toBe(true);
+  });
+});
+
+// Araştırma protokolü Faz 5: kaynak envanteri ("Taranan kaynaklar") yanıtta yapısal alan olarak
+// gelir ve mesajla birlikte saklanır. Bozuk ya da eksik envanter CEVABI DÜŞÜRMEZ → null.
+describe('kaynak_envanteri', () => {
+  const baseAnswer = {
+    answer: 'cevap',
+    sources: [baseDoc],
+    conflicts: [],
+    confidence_score: 0.8,
+    tokens_used: { prompt: 10, completion: 5 },
+    not_found: false,
+    secondary_legislation_note: null,
+  };
+  const envanter = {
+    turler: [
+      { tur: 'kanun', grup: 'duzenleme', arandi: true, bulundu: 3, sentez: 2, en_iyi_skor: 0.9,
+        neden_yok: null, capali: 0, guncellik_uyari: 0 },
+      { tur: 'teblig', grup: 'duzenleme', arandi: true, bulundu: 0, sentez: 0, en_iyi_skor: null,
+        neden_yok: 'sonuc_yok', capali: 0, guncellik_uyari: 0 },
+      { tur: 'danistay_karar', grup: 'denetim', arandi: false, bulundu: 0, sentez: 0, en_iyi_skor: null,
+        neden_yok: 'kullanici_kisiti' },
+    ],
+    atlandi: false,
+    celiski: true,
+  };
+
+  it('answer: retains a well-formed envanter through parse', () => {
+    const parsed = BrainAnswerResponseSchema.parse({ ...baseAnswer, kaynak_envanteri: envanter });
+    expect(parsed.kaynak_envanteri?.turler).toHaveLength(3);
+    expect(parsed.kaynak_envanteri?.celiski).toBe(true);
+    expect(parsed.kaynak_envanteri?.turler[2]?.capali).toBe(0);   // eksik sayaç varsayılanı
+  });
+
+  it('answer: keeps kontrol_tebligleri (ilgili genel tebliğ adları), defaults to []', () => {
+    const withNames = BrainAnswerResponseSchema.parse({
+      ...baseAnswer,
+      kaynak_envanteri: { ...envanter, kontrol_tebligleri: ['KDV Genel Uygulama Tebliği'] },
+    });
+    expect(withNames.kaynak_envanteri?.kontrol_tebligleri).toEqual(['KDV Genel Uygulama Tebliği']);
+    expect(BrainAnswerResponseSchema.parse({ ...baseAnswer, kaynak_envanteri: envanter })
+      .kaynak_envanteri?.kontrol_tebligleri).toEqual([]);
+  });
+
+  it('answer: missing envanter parses (legacy / skipped)', () => {
+    const parsed = BrainAnswerResponseSchema.parse(baseAnswer);
+    expect(parsed.kaynak_envanteri ?? null).toBeNull();
+    expect(BrainAnswerResponseSchema.parse({ ...baseAnswer, kaynak_envanteri: null }).kaynak_envanteri).toBeNull();
+  });
+
+  it('answer: malformed envanter becomes null, the answer survives', () => {
+    const parsed = BrainAnswerResponseSchema.safeParse({ ...baseAnswer, kaynak_envanteri: { turler: 'x' } });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.kaynak_envanteri).toBeNull();
+    expect(parsed.success && parsed.data.answer).toBe('cevap');
+  });
+
+  const baseBrowse = {
+    documents: [baseDoc],
+    total_found: 1,
+    per_corpus_counts: { danistay: 1 },
+    search_time_ms: 12,
+    applied: { smart: false, reranked: false, semantic_query: 'q' },
+  };
+  const browseEnv = {
+    gruplar: [
+      { grup: 'duzenleme', etiket: 'Düzenleme ve idarenin yorumu',
+        korpuslar: [{ korpus: 'teblig', etiket: 'Tebliğler', sayi: 0, durum: 'sonuc_yok' }] },
+      { grup: 'denetim', etiket: 'Yargı ve öğretinin yaklaşımı',
+        korpuslar: [{ korpus: 'danistay', etiket: 'Danıştay Kararları', sayi: 1, durum: 'bulundu' },
+                    { korpus: 'iham', etiket: 'AİHM Kararları', sayi: 0, durum: 'kapali' }] },
+    ],
+  };
+
+  it('browse: retains grouped counters', () => {
+    const parsed = BrainBrowseDocumentsResponseSchema.parse({ ...baseBrowse, kaynak_envanteri: browseEnv });
+    expect(parsed.kaynak_envanteri?.gruplar[1]?.korpuslar[1]?.durum).toBe('kapali');
+  });
+
+  it('browse: malformed or missing envanter becomes null, results survive', () => {
+    const bad = BrainBrowseDocumentsResponseSchema.safeParse({ ...baseBrowse, kaynak_envanteri: { gruplar: 3 } });
+    expect(bad.success && bad.data.kaynak_envanteri).toBeNull();
+    expect(bad.success && bad.data.documents).toHaveLength(1);
+    expect(BrainBrowseDocumentsResponseSchema.parse(baseBrowse).kaynak_envanteri ?? null).toBeNull();
+  });
+});
+
+// Takip sorusu önerileri: web son cevabın altında baloncuk olarak gösterir. Bir kolaylık —
+// alanın yokluğu, null'ı ya da bozuk şekli cevabın tamamını asla düşürmez.
+describe('suggested_followups', () => {
+  const baseAnswer = {
+    answer: 'cevap',
+    sources: [],
+    conflicts: [],
+    confidence_score: 0.8,
+    tokens_used: { prompt: 10, completion: 5 },
+    not_found: false,
+    secondary_legislation_note: null,
+  };
+
+  it('defaults to [] when missing or null', () => {
+    expect(BrainAnswerResponseSchema.parse(baseAnswer).suggested_followups).toEqual([]);
+    expect(BrainAnswerResponseSchema.parse({ ...baseAnswer, suggested_followups: null }).suggested_followups).toEqual([]);
+  });
+
+  it('passes the questions through', () => {
+    const q = ['Örtülü sermaye faizi gider yazılabilir mi?'];
+    expect(BrainAnswerResponseSchema.parse({ ...baseAnswer, suggested_followups: q }).suggested_followups).toEqual(q);
+  });
+
+  it('a malformed value never fails the whole answer', () => {
+    for (const bad of ['x', [1], { a: 1 }]) {
+      const r = BrainAnswerResponseSchema.safeParse({ ...baseAnswer, suggested_followups: bad });
+      expect(r.success && r.data.suggested_followups).toEqual([]);
+    }
   });
 });
