@@ -1,3 +1,4 @@
+import { brainClient } from '../../brain/brain.client.js';
 import type { RequestHandler } from 'express';
 import { z } from 'zod';
 import { supabaseAdmin } from '../../config/supabase.js';
@@ -48,6 +49,15 @@ export const getCredits: RequestHandler = async (req, res, next) => {
       listTransactions(req.user.id, 20),
     ]);
     res.json({ balance, transactions });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** Admin-only: Claude test bütçesinden kalan tutar (Beyin /v2/budget, yaklaşık). */
+export const getClaudeBudget: RequestHandler = async (_req, res, next) => {
+  try {
+    res.json(await brainClient.getClaudeBudget());
   } catch (err) {
     next(err);
   }
