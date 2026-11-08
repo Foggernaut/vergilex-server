@@ -379,3 +379,173 @@ describe('suggested_followups', () => {
     }
   });
 });
+
+// Belge Bul sözleşmesi: beyin `DocumentResult` / `AppliedInfo` alanları web'e eksiksiz ulaşmalı.
+// Zod `z.object` bilinmeyen anahtarı SESSİZCE eler — künye modu ve tebliğ kimliği bu yüzden
+// web'e hiç gelmiyordu. Bu testler "şemada olmayan alan düşer" tuzağını pinler.
+describe('belge bul sözleşmesi', () => {
+  // Beyin `DocumentResult`'ının (api models/responses.py) `full_text` dışındaki HER alanı. Beyine alan
+  // eklenince bu liste ve fixture birlikte güncellenir; aksi halde alan sessizce düşer.
+  const BRAIN_DOC_FIELDS_EXCEPT_FULL_TEXT = [
+    'chunk_id', 'law_id', 'law_name', 'madde_no', 'madde_basligi', 'title', 'subtitle', 'excerpt',
+    'relevance_score', 'source_type', 'law_references', 'source_ref', 'source_id', 'source_url',
+    'dogrulanmali', 'dil', 'mahkeme_turu', 'relevance_category', 'relevance_rationale', 'kimlik_eslesmesi',
+  ] as const;
+
+  const fullDoc = {
+    chunk_id: 'teblig_1_c3',
+    law_id: 'teblig_kv_gt_26',
+    law_name: 'Kurumlar Vergisi Genel Tebliği (Seri No: 26)',
+    madde_no: '5',
+    madde_basligi: 'Örtülü kazanç',
+    title: 'Kurumlar Vergisi GT (Seri No: 26)',
+    subtitle: 'RG 12.03.2021',
+    excerpt: 'kaynağın kendi metni',
+    relevance_score: 0.88,
+    source_type: 'teblig',
+    law_references: ['KVK m.13'],
+    source_ref: 'KV GT Seri No: 26',
+    source_id: 'TEBL-26',
+    source_url: 'https://example.test/teblig/26',
+    dogrulanmali: false,
+    dil: 'tr',
+    mahkeme_turu: 'danistay',
+    relevance_category: 'dogrudan',
+    relevance_rationale: 'sorguda anılan tebliğin kendisi',
+    kimlik_eslesmesi: true,
+  };
+
+  const baseApplied = { smart: true, reranked: true, semantic_query: 'q' };
+  const baseBrowse = {
+    documents: [fullDoc],
+    total_found: 1,
+    per_corpus_counts: { teblig: 1 },
+    search_time_ms: 7,
+    applied: baseApplied,
+  };
+
+  const kimlik = {
+    aranan: 'Kurumlar Vergisi GT Seri No 26',
+    durum: 'ana_metne_islenmis',
+    not_metni: 'Bu değişiklik ana tebliğin metnine işlenmiştir.',
+    sabit_id: 'TEBL-26',
+    liste: [
+      { id: 'TEBL-26', adi: 'Kurumlar Vergisi GT (Seri No: 26)', rg_tarihi: '2021-03-12' },
+      { id: 'TEBL-27', adi: 'Kurumlar Vergisi GT (Seri No: 27)', rg_tarihi: null },
+      { id: 'TEBL-28', adi: 'Kurumlar Vergisi GT (Seri No: 28)' },
+    ],
+    etkilenen: [{ chunk_id: 'c9', document_id: 'TEBL-1', etiket: 'Bölüm 3.2' }],
+    etkilenen_toplam: 4,
+    aile_toplam: 31,
+  };
+
+  it('fixture covers every brain DocumentResult field except full_text', () => {
+    expect(Object.keys(fullDoc).sort()).toEqual([...BRAIN_DOC_FIELDS_EXCEPT_FULL_TEXT].sort());
+  });
+
+  it('document: every brain field except full_text survives parse unchanged', () => {
+    const parsed = BrainDocumentResultSchema.parse(fullDoc);
+    expect(parsed).toEqual(fullDoc);
+  });
+
+  it('document: full_text and unknown keys are still stripped (JSONB size guard)', () => {
+    const parsed = BrainDocumentResultSchema.parse({ ...fullDoc, full_text: 'x'.repeat(1000), bilinmeyen_alan: 1 });
+    expect(parsed).toEqual(fullDoc);
+    expect('full_text' in parsed).toBe(false);
+    expect('bilinmeyen_alan' in parsed).toBe(false);
+  });
+
+  it('document: kimlik_eslesmesi accepts null/absent (older brain)', () => {
+    const { kimlik_eslesmesi, ...legacy } = fullDoc;
+    void kimlik_eslesmesi;
+    expect(BrainDocumentResultSchema.parse(legacy).kimlik_eslesmesi).toBeUndefined();
+    expect(BrainDocumentResultSchema.parse({ ...legacy, kimlik_eslesmesi: null }).kimlik_eslesmesi).toBeNull();
+  });
+
+  it('applied: künye alanları web\'e geçer', () => {
+    const parsed = BrainBrowseDocumentsResponseSchema.parse({
+      ...baseBrowse,
+      applied: {
+        ...baseApplied,
+        kunye_mode: true,
+        kunye_bulunan: ['E:2022/4647 K:2023/459'],
+        kunye_bulunamayan: ['E:2019/1 K:2020/2'],
+      },
+    });
+    expect(parsed.applied.kunye_mode).toBe(true);
+    expect(parsed.applied.kunye_bulunan).toEqual(['E:2022/4647 K:2023/459']);
+    expect(parsed.applied.kunye_bulunamayan).toEqual(['E:2019/1 K:2020/2']);
+  });
+
+  it('applied: künye alanları yoksa güvenli varsayılan (eski beyin)', () => {
+    const parsed = BrainBrowseDocumentsResponseSchema.parse(baseBrowse);
+    expect(parsed.applied.kunye_mode).toBe(false);
+    expect(parsed.applied.kunye_bulunan).toEqual([]);
+    expect(parsed.applied.kunye_bulunamayan).toEqual([]);
+    expect(parsed.applied.teblig_kimlik ?? null).toBeNull();
+  });
+
+  it('applied: teblig_kimlik aynen geçer', () => {
+    const parsed = BrainBrowseDocumentsResponseSchema.parse({
+      ...baseBrowse,
+      applied: { ...baseApplied, teblig_kimlik: kimlik },
+    });
+    expect(parsed.applied.teblig_kimlik).toEqual({
+      ...kimlik,
+      liste: [
+        { id: 'TEBL-26', adi: 'Kurumlar Vergisi GT (Seri No: 26)', rg_tarihi: '2021-03-12' },
+        { id: 'TEBL-27', adi: 'Kurumlar Vergisi GT (Seri No: 27)', rg_tarihi: null },
+        { id: 'TEBL-28', adi: 'Kurumlar Vergisi GT (Seri No: 28)' },
+      ],
+    });
+  });
+
+  it('applied: teblig_kimlik minimal (yalnız zorunlu alanlar) varsayılanlarla parse olur', () => {
+    const parsed = BrainBrowseDocumentsResponseSchema.parse({
+      ...baseBrowse,
+      applied: { ...baseApplied, teblig_kimlik: { aranan: 'x', durum: 'bulunamadi', not_metni: 'y' } },
+    });
+    expect(parsed.applied.teblig_kimlik).toEqual({
+      aranan: 'x', durum: 'bulunamadi', not_metni: 'y',
+      liste: [], etkilenen: [], etkilenen_toplam: 0, aile_toplam: 0,
+    });
+  });
+
+  it('applied: teblig_kimlik null kalır null', () => {
+    const parsed = BrainBrowseDocumentsResponseSchema.parse({
+      ...baseBrowse,
+      applied: { ...baseApplied, teblig_kimlik: null },
+    });
+    expect(parsed.applied.teblig_kimlik).toBeNull();
+  });
+
+  it('applied: bozuk teblig_kimlik null olur, sonuçlar ve diğer applied alanları düşmez', () => {
+    for (const bad of [
+      'x',
+      { aranan: 3 },
+      { ...kimlik, liste: 'yok' },
+      { ...kimlik, etkilenen: [{ chunk_id: 'c' }] },
+      { ...kimlik, etkilenen_toplam: 'çok' },
+    ]) {
+      const r = BrainBrowseDocumentsResponseSchema.safeParse({
+        ...baseBrowse,
+        applied: { ...baseApplied, kunye_mode: true, kunye_bulunan: ['k'], teblig_kimlik: bad },
+      });
+      expect(r.success, JSON.stringify(bad)).toBe(true);
+      if (!r.success) continue;
+      expect(r.data.applied.teblig_kimlik).toBeNull();
+      expect(r.data.documents).toEqual([fullDoc]);
+      expect(r.data.applied.kunye_mode).toBe(true);
+      expect(r.data.applied.kunye_bulunan).toEqual(['k']);
+    }
+  });
+
+  it('applied: bilinmeyen alan düşmez (passthrough)', () => {
+    const parsed = BrainBrowseDocumentsResponseSchema.parse({
+      ...baseBrowse,
+      applied: { ...baseApplied, gelecekteki_alan: { a: 1 }, baska: 'x' },
+    });
+    expect((parsed.applied as Record<string, unknown>).gelecekteki_alan).toEqual({ a: 1 });
+    expect((parsed.applied as Record<string, unknown>).baska).toBe('x');
+  });
+});
