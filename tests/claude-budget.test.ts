@@ -2,13 +2,14 @@
 import express from 'express';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as AuthModule from '../src/middleware/auth.js';
 
 const brain = vi.hoisted(() => ({ getClaudeBudget: vi.fn() }));
 const who = vi.hoisted(() => ({ role: 'user' as 'user' | 'admin' }));
 
 vi.mock('../src/brain/brain.client.js', () => ({ brainClient: brain }));
 vi.mock('../src/middleware/auth.js', async (orig) => {
-  const real = await orig<typeof import('../src/middleware/auth.js')>();
+  const real = await orig<typeof AuthModule>();
   return {
     ...real,
     requireAuth: (req: express.Request, _res: express.Response, next: express.NextFunction) => {

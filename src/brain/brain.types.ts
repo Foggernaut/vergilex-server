@@ -65,6 +65,11 @@ export const BrainDocumentResultSchema = z.object({
   source_ref: z.string().nullable().optional(),
   source_url: z.string().nullable().optional(),
   dogrulanmali: z.boolean().nullable().optional(),
+  // Belge Bul tebliğ kimliği: sorguda anılan tebliğin kendisi olan sabitlenmiş kart (brain
+  // `kimlik_eslesmesi`). Anahtar şemada olmazsa zod eler → kart "kimlik" rozetini kaybeder.
+  // Bu şemada `.passthrough()` YOK: sohbet mesajları kaynakları JSONB'ye yazar ve `full_text`
+  // (yukarıda) bilerek dışarıda; bilinmeyen anahtar eleme davranışı korunur.
+  kimlik_eslesmesi: z.boolean().nullable().optional(),
 });
 export type BrainDocumentResult = z.infer<typeof BrainDocumentResultSchema>;
 
@@ -141,7 +146,35 @@ export const BrainBrowseDocumentsRequestSchema = z.object({
 });
 export type BrainBrowseDocumentsRequest = z.infer<typeof BrainBrowseDocumentsRequestSchema>;
 
+// Sorguda anılan tebliğin kimlik çözümü (brain `TebligKimlikInfo`, `services.teblig_kimlik.coz`).
+// VergiLex'in ürettiği not YALNIZ burada görünür. `durum` bilerek serbest string: brain yeni durum
+// eklerse (bulundu | ana_metne_islenmis | ayri_belge_yok | birden_cok | aile_listesi | bulunamadi …)
+// bütün yanıt reddedilmesin.
+export const BrainTebligKimlikBelgeSchema = z.object({
+  id: z.string(),
+  adi: z.string(),
+  rg_tarihi: z.string().nullable().optional(), // ISO (YYYY-MM-DD)
+});
+export const BrainTebligKimlikBolumSchema = z.object({
+  chunk_id: z.string(),
+  document_id: z.string(),
+  etiket: z.string(),
+});
+export const BrainTebligKimlikSchema = z.object({
+  aranan: z.string(),
+  durum: z.string(),
+  not_metni: z.string(),
+  sabit_id: z.string().nullable().optional(),
+  liste: z.array(BrainTebligKimlikBelgeSchema).default([]),
+  etkilenen: z.array(BrainTebligKimlikBolumSchema).default([]),
+  etkilenen_toplam: z.number().int().default(0),
+  aile_toplam: z.number().int().default(0),
+});
+export type BrainTebligKimlik = z.infer<typeof BrainTebligKimlikSchema>;
+
 // Effective intent echoed back (parsed + user-overridden filters).
+// `.passthrough()`: brain `applied`'a yeni alan eklediğinde (künye modu alanları bu yüzden web'e hiç
+// ulaşmıyordu) zod onu sessizce ELEMESİN. Yalnız bu şemada — belge şemasında değil (bkz. full_text).
 export const BrainBrowseAppliedSchema = z.object({
   smart: z.boolean(),
   reranked: z.boolean(),
@@ -155,7 +188,14 @@ export const BrainBrowseAppliedSchema = z.object({
   date_to: z.string().nullable().optional(),
   madde_tipi: z.string().nullable().optional(),
   exclude_mulga: z.boolean().default(true),
-});
+  // Künye modu (E:/K: tam eşleşme). `kunye_bulunamayan` KRİTİK: "bu künyeler korpusta yok" demek,
+  // alakasız 20 karar göstermekten iyidir.
+  kunye_mode: z.boolean().default(false),
+  kunye_bulunan: z.array(z.string()).default([]),
+  kunye_bulunamayan: z.array(z.string()).default([]),
+  // `.catch(null)`: bozuk kimlik kutusu sonuçları DÜŞÜRMEZ, yalnız kutu kaybolur.
+  teblig_kimlik: BrainTebligKimlikSchema.nullable().optional().catch(null),
+}).passthrough();
 export type BrainBrowseApplied = z.infer<typeof BrainBrowseAppliedSchema>;
 
 // Araştırma protokolü Faz 5 — Belge Bul tür sayaçları: grup (düzenleme / denetim / yardımcı) →
