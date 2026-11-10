@@ -1,13 +1,17 @@
 import { env } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
 import { supabaseAdmin } from '../../config/supabase.js';
+import { AppError } from '../../utils/errors.js';
 import type { BrainBrowseDocumentsResponse } from '../../brain/brain.types.js';
 
 // Belge Bul Geçmiş — aramanın tam yanıtı `search_results` tablosunda BELGE_BUL_SONUC_SAKLAMA_GUN gün
 // (varsayılan 7; 0 = kapalı) saklanır; geçmişten tıklanınca kredisiz açılır.
 //
-// Her yardımcı FAIL-OPEN: tablo yokken (migration 020 uygulanmadan deploy) ya da Supabase yavaş/ölüyken
-// Belge Bul ve Geçmiş listesi çalışmaya devam eder — hata yutulur, günlüğe yazılır.
+// Yazma (`sonucuKaydet`) ve liste etiketi (`kayitliSonucIdleri`) FAIL-OPEN: tablo yokken (migration 020
+// uygulanmadan deploy) ya da Supabase yavaş/ölüyken Belge Bul ve Geçmiş listesi çalışmaya devam eder —
+// hata yutulur, günlüğe yazılır. `kayitliSonuc` ise ÜÇ DURUMLU: "kayıt yok" (null) ile "okunamadı"
+// (503 AppError) ayrılır; web yalnız 404'te yeniden çalıştırır (2 KR), geçici DB hatası ücretli
+// yeniden çalıştırmaya dönmesin.
 // Her Supabase çağrısı 5 sn ile sınırlıdır: server.ts'teki global undici Agent 420 sn başlık/gövde
 // zaman aşımı taşır ve Supabase'in fetch'i onu paylaşır; sınır olmazsa takılan bir çağrı dakikalarca asılı kalır.
 
@@ -102,15 +106,22 @@ export async function sonucuKaydet(a: {
   }
 }
 
-/** Kayıtlı yanıt: yalnız sahibine ve süresi dolmamışsa; aksi halde (ya da hata/kapalıysa) null. */
+/**
+ * Kayıtlı yanıt: yalnız sahibine ve süresi dolmamışsa döner.
+ * - kayıt yok / süresi dolmuş / başkasının / saklama kapalı → `null` (gerçekten yok: controller 404).
+ * - Supabase hatası ya da reddedilen çağrı (tablo yok PGRST205, 5 sn AbortSignal dahil) → 503 `AppError`
+ *   fırlatır: "yok" ile "okunamadı" karışmasın, web geçici hatayı ücretli yeniden çalıştırmaya çevirmesin.
+ */
 export async function kayitliSonuc(
   historyId: string,
   userId: string
 ): Promise<{ created_at: string; request: unknown; response: unknown } | null> {
   const gun = saklamaGun();
   if (gun <= 0) return null;
+
+  let sonuc;
   try {
-    const { data, error } = await supabaseAdmin
+    sonuc = await supabaseAdmin
       .from(TABLE)
       .select('created_at, request, response')
       .eq('history_id', historyId)
@@ -118,16 +129,22 @@ export async function kayitliSonuc(
       .gte('created_at', esikISO(gun))
       .abortSignal(sinir())
       .maybeSingle();
-    if (error) {
-      logger.warn('search_results read failed', { historyId, code: error.code, message: error.message });
-      return null;
-    }
-    return data ?? null;
   } catch (err) {
     logger.warn('search_results read threw', { historyId, err: err instanceof Error ? err.message : err });
-    return null;
+    throw okunamadi();
   }
+  if (sonuc.error) {
+    logger.warn('search_results read failed', {
+      historyId,
+      code: sonuc.error.code,
+      message: sonuc.error.message,
+    });
+    throw okunamadi();
+  }
+  return sonuc.data ?? null;
 }
+
+const okunamadi = () => new AppError(503, 'SAVED_RESULT_UNAVAILABLE', 'Kayıtlı sonuç şu an okunamıyor');
 
 /**
  * Verilen geçmiş id'lerinden kayıtlı (süresi dolmamış) sonucu olanlar. Yalnız `history_id, created_at`

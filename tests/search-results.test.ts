@@ -296,16 +296,37 @@ describe('kayitliSonuc', () => {
     expect(await kayitliSonuc(H1, U1)).toBeNull();
   });
 
-  it('tablo yokken (PGRST205) null döner ve uyarı yazar', async () => {
-    fake.failOn('search_results', 'select', { code: 'PGRST205' });
+  it('saklama kapalıyken (0) fırlatmaz, null döner', async () => {
+    env.BELGE_BUL_SONUC_SAKLAMA_GUN = 0;
     expect(await kayitliSonuc(H1, U1)).toBeNull();
-    expect(log.warn).toHaveBeenCalled();
   });
 
-  it('supabase çağrısı reddedilirse null döner', async () => {
-    fake.failOn('search_results', 'select', new Error('fetch failed'));
-    expect(await kayitliSonuc(H1, U1)).toBeNull();
-    expect(log.warn).toHaveBeenCalled();
+  // Üç durumlu: "yok" (null → 404) ile "okunamadı" (503) AYRI; geçici DB hatası ücretli yeniden çalıştırmaya
+  // dönmesin diye web yalnız 404'te yeniden çalıştırır.
+  describe('okuma hatası → 503 (null DEĞİL)', () => {
+    const f503 = { status: 503, code: 'SAVED_RESULT_UNAVAILABLE' };
+
+    it('tablo yokken (PGRST205) 503 AppError fırlatır ve uyarı yazar', async () => {
+      fake.failOn('search_results', 'select', { code: 'PGRST205' });
+      await expect(kayitliSonuc(H1, U1)).rejects.toMatchObject(f503);
+      expect(log.warn).toHaveBeenCalled();
+    });
+
+    it('supabase çağrısı reddedilirse (ağ hatası) 503 fırlatır', async () => {
+      fake.failOn('search_results', 'select', new Error('fetch failed'));
+      await expect(kayitliSonuc(H1, U1)).rejects.toMatchObject(f503);
+      expect(log.warn).toHaveBeenCalled();
+    });
+
+    it('5 sn AbortSignal zaman aşımı (reddedilen TimeoutError) 503 fırlatır', async () => {
+      fake.failOn('search_results', 'select', new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+      await expect(kayitliSonuc(H1, U1)).rejects.toMatchObject(f503);
+    });
+
+    it('postgrest-js abort\'u {error} nesnesine çevirirse de 503 fırlatır', async () => {
+      fake.failOn('search_results', 'select', { code: '', message: 'TimeoutError: The operation was aborted due to timeout' });
+      await expect(kayitliSonuc(H1, U1)).rejects.toMatchObject(f503);
+    });
   });
 });
 

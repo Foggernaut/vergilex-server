@@ -8,13 +8,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   browseDocuments: vi.fn(),
   deductCredits: vi.fn(),
+  log: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
 vi.mock('../src/brain/brain.client.js', () => ({ brainClient: { browseDocuments: mocks.browseDocuments } }));
 vi.mock('../src/modules/credits/credits.service.js', () => ({ deductCredits: mocks.deductCredits }));
-vi.mock('../src/config/logger.js', () => ({
-  logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
-}));
+vi.mock('../src/config/logger.js', () => ({ logger: mocks.log }));
 vi.mock('../src/config/supabase.js', async () => {
   const { fakeSupabase } = await import('./helpers/fakeSupabase.js');
   return { supabaseAdmin: fakeSupabase };
@@ -178,6 +177,8 @@ describe('findDocuments — history_id ve kayıtlı sonuç', () => {
     const [ekleme] = fake.callsFor('search_history', 'insert');
     expect(ekleme!.columns).toBe('id');
     expect(ekleme!.single).toBe('single');
+    // yanıttan ÖNCE çalışan çağrı: 5 sn AbortSignal ile sınırlı (global undici 420 sn)
+    expect(ekleme!.signal).toBeInstanceOf(AbortSignal);
 
     const [satir] = fake.rows('search_history');
     expect(res.body.history_id).toBe(satir!.id);
@@ -274,12 +275,34 @@ describe('findDocuments — history_id ve kayıtlı sonuç', () => {
     await kayitBekle();
   });
 
-  it('geçmiş insert\'i hata dönerse history_id null, yanıt 200 ve kayıt yazılmaz', async () => {
+  it('geçmiş insert\'i hata dönerse history_id null, yanıt 200, uyarı yazılır ve kayıt yazılmaz', async () => {
     fake.failOn('search_history', 'insert', { code: 'PGRST205', message: 'x' });
     const res = await request(app).post('/api/documents/find').send(govde);
     expect(res.status).toBe(200);
     expect(res.body.history_id).toBeNull();
     expect(res.body.documents).toHaveLength(1);
+    expect(mocks.log.warn).toHaveBeenCalledWith(
+      expect.stringContaining('search_history insert failed'),
+      expect.objectContaining({ code: 'PGRST205' })
+    );
+    await biraz();
+    expect(fake.callsFor('search_results', 'insert')).toHaveLength(0);
+  });
+
+  it('geçmiş insert\'i reddedilirse (5 sn zaman aşımı) history_id null, yanıt 200 ve uyarı yazılır', async () => {
+    fake.failOn(
+      'search_history',
+      'insert',
+      new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+    );
+    const res = await request(app).post('/api/documents/find').send(govde);
+    expect(res.status).toBe(200);
+    expect(res.body.history_id).toBeNull();
+    expect(res.body.newBalance).toBe(42);
+    expect(mocks.log.warn).toHaveBeenCalledWith(
+      expect.stringContaining('search_history insert threw'),
+      expect.any(Object)
+    );
     await biraz();
     expect(fake.callsFor('search_results', 'insert')).toHaveLength(0);
   });
@@ -443,8 +466,29 @@ describe('getSavedResults', () => {
     expect(fake.callsFor('search_results')).toHaveLength(0);
   });
 
-  it('tablo yokken (PGRST205) 404 (fail-open), 500 değil', async () => {
+  // R-S1a: üç durumlu. Okuma hatası (tablo yok, ağ, 5 sn abort) → 503; web bunu ücretli yeniden çalıştırmaya
+  // ÇEVİRMEZ (yalnız 404'te yeniden çalıştırır).
+  it('Supabase hatası (tablo yok, PGRST205) → 503, 404 DEĞİL', async () => {
     fake.failOn('search_results', 'select', { code: 'PGRST205', message: 'tablo yok' });
+    const res = await request(app).get(`/api/documents/history/${ID}/results`);
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('SAVED_RESULT_UNAVAILABLE');
+    expect(mocks.deductCredits).not.toHaveBeenCalled();
+    expect(mocks.browseDocuments).not.toHaveBeenCalled();
+  });
+
+  it('reddedilen çağrı / 5 sn abort zaman aşımı → 503', async () => {
+    fake.failOn(
+      'search_results',
+      'select',
+      new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+    );
+    const res = await request(app).get(`/api/documents/history/${ID}/results`);
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('SAVED_RESULT_UNAVAILABLE');
+  });
+
+  it('gerçekten yok (hata yok, satır yok) 503 değil 404', async () => {
     const res = await request(app).get(`/api/documents/history/${ID}/results`);
     expect(res.status).toBe(404);
   });
