@@ -1,12 +1,13 @@
 import type { RequestHandler } from 'express';
 import { z } from 'zod';
-import { AuthError } from '../../utils/errors.js';
+import { AuthError, NotFoundError } from '../../utils/errors.js';
 import { brainClient } from '../../brain/brain.client.js';
 import { deductCredits } from '../credits/credits.service.js';
 import { CREDIT_COSTS } from '../../utils/creditCosts.js';
 import { supabaseAdmin } from '../../config/supabase.js';
 import { MAX_QUERY_CHARS, MIN_QUERY_CHARS } from '../../utils/queryLimits.js';
 import { historyApplied } from './historyApplied.js';
+import { kayitliSonuc, kayitliSonucIdleri, sonucKaydedilmeli, sonucuKaydet } from './searchResults.js';
 
 // Belge Bul = advanced search: LLM query-parse (smart) + facet filters + hybrid/rerank.
 // Deep per-corpus recall, parent-deduped, paginated client-side.
@@ -55,21 +56,49 @@ export const findDocuments: RequestHandler = async (req, res, next) => {
       },
     });
 
-    await supabaseAdmin.from('search_history').insert({
-      user_id: req.user.id,
-      query: input.query,
-      search_type: 'doc_finder',
-      // applied.teblig_kimlik: geçmişe yalnız özet yazılır (bkz. historyApplied); yanıt tam kalır.
-      // kaynak_envanteri: grup başlıklı tür sayaçları (araştırma protokolü Faz 5) — filters jsonb'de, migration gerekmez.
-      filters: {
-        applied: historyApplied(result.applied),
-        per_corpus_counts: result.per_corpus_counts,
-        kaynak_envanteri: result.kaynak_envanteri ?? null,
-      },
-      results_count: result.documents.length,
-    });
+    // Kullanıcının gönderdiği istek: geçmiş satırına sorgusuz yazılır (`filters.request`; süresi dolmuş bir
+    // aramayı aynı filtrelerle yeniden çalıştırmak için, kalıcıdır); saklanan sonuca sorgu dahil yazılır.
+    const istek = {
+      filters: input.filters,
+      per_corpus: input.per_corpus,
+      smart: input.smart,
+      rerank: input.rerank,
+    };
 
-    res.json({ ...result, newBalance });
+    // id geri alınır (history_id): hata olursa null — geçmiş yazımı hâlâ yanıtı bozmaz. 5 sn sınırı: bu çağrı
+    // yanıttan ÖNCE yapılır ve global undici zaman aşımı (420 sn) Supabase fetch'iyle paylaşılır.
+    const { data: gecmis } = await supabaseAdmin
+      .from('search_history')
+      .insert({
+        user_id: req.user.id,
+        query: input.query,
+        search_type: 'doc_finder',
+        // applied.teblig_kimlik: geçmişe yalnız özet yazılır (bkz. historyApplied); yanıt tam kalır.
+        // kaynak_envanteri: grup başlıklı tür sayaçları (araştırma protokolü Faz 5) — filters jsonb'de, migration gerekmez.
+        filters: {
+          applied: historyApplied(result.applied),
+          per_corpus_counts: result.per_corpus_counts,
+          kaynak_envanteri: result.kaynak_envanteri ?? null,
+          request: istek,
+        },
+        results_count: result.documents.length,
+      })
+      .select('id')
+      .abortSignal(AbortSignal.timeout(5000))
+      .single();
+    const historyId: string | null = gecmis?.id ?? null;
+
+    res.json({ ...result, history_id: historyId, newBalance });
+
+    // Kayıtlı sonuç yanıttan SONRA, beklenmeden yazılır (ölümcül değil; sonucuKaydet hiçbir hatayı fırlatmaz).
+    if (historyId && sonucKaydedilmeli(result)) {
+      void sonucuKaydet({
+        historyId,
+        userId: req.user.id,
+        request: { query: input.query, ...istek },
+        response: result,
+      });
+    }
   } catch (err) {
     next(err);
   }
@@ -101,7 +130,48 @@ export const getDocumentHistory: RequestHandler = async (req, res, next) => {
 
     const rows = data ?? [];
     const hasMore = rows.length > limit;
-    res.json({ page, limit, hasMore, items: hasMore ? rows.slice(0, limit) : rows });
+    const items: Array<{ id: string }> = hasMore ? rows.slice(0, limit) : rows;
+
+    // has_results: yalnız dilimlenmiş sayfanın id'leri (limit+1'inci satır değil) için, ayrı hafif sorgu —
+    // `response` okunmaz; tablo yoksa kayitliSonucIdleri boş küme döner, liste kırılmaz.
+    const kayitli = await kayitliSonucIdleri(
+      items.map((i) => i.id),
+      req.user.id
+    );
+    res.json({
+      page,
+      limit,
+      hasMore,
+      items: items.map((i) => ({ ...i, has_results: kayitli.has(i.id) })),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Kayıtlı Belge Bul yanıtı (Geçmiş'ten tıklama). Kredi düşmez, beyne gidilmez, aiLimiter yok (genel sınır
+// yeterli). Yalnız sahibine ve saklama süresi dolmamışsa; aksi halde 404 — web bu durumda aramayı yeniden
+// çalıştırır. Geçersiz id 400 değil 404 (web yalnız 404'te yeniden çalıştırır).
+export const getSavedResults: RequestHandler = async (req, res, next) => {
+  try {
+    if (!req.user) throw new AuthError();
+    const id = z.string().uuid().safeParse(req.params.id);
+    if (!id.success) throw new NotFoundError('Kayıtlı sonuç bulunamadı');
+
+    const kayit = await kayitliSonuc(id.data, req.user.id);
+    const saklananIstek = kayit?.request;
+    // Sorgu `request`'ten gelir; yoksa (bozuk satır) kayıt yok sayılır → web yeniden çalıştırır.
+    if (
+      !kayit ||
+      !saklananIstek ||
+      typeof saklananIstek !== 'object' ||
+      typeof (saklananIstek as { query?: unknown }).query !== 'string'
+    ) {
+      throw new NotFoundError('Kayıtlı sonuç bulunamadı');
+    }
+
+    const { query, ...istek } = saklananIstek as { query: string } & Record<string, unknown>;
+    res.json({ query, created_at: kayit.created_at, request: istek, response: kayit.response });
   } catch (err) {
     next(err);
   }
