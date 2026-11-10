@@ -549,3 +549,16 @@ describe('belge bul sözleşmesi', () => {
     expect((parsed.applied as Record<string, unknown>).baska).toBe('x');
   });
 });
+
+describe('BrainDocumentResultSchema — karar_yonu (db 063 doğrulanmış karar yönü)', () => {
+  it('karar_yonu alanını korur', () => {
+    const p = BrainDocumentResultSchema.safeParse({ ...baseDoc, karar_yonu: 'mukellef_lehine' });
+    expect(p.success && p.data.karar_yonu).toBe('mukellef_lehine');
+  });
+
+  it('alan yok ya da null iken geçer; bilinmeyen değer şemayı düşürmez', () => {
+    expect(BrainDocumentResultSchema.safeParse(baseDoc).success).toBe(true);
+    expect(BrainDocumentResultSchema.safeParse({ ...baseDoc, karar_yonu: null }).success).toBe(true);
+    expect(BrainDocumentResultSchema.safeParse({ ...baseDoc, karar_yonu: 'yeni_deger' }).success).toBe(true);
+  });
+});
