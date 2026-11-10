@@ -70,6 +70,10 @@ export const BrainDocumentResultSchema = z.object({
   // Bu şemada `.passthrough()` YOK: sohbet mesajları kaynakları JSONB'ye yazar ve `full_text`
   // (yukarıda) bilerek dışarıda; bilinmeyen anahtar eleme davranışı korunur.
   kimlik_eslesmesi: z.boolean().nullable().optional(),
+  // Doğrulanmış Danıştay karar yönü (brain `karar_yonu`; db 063 kural motoru): mukellef_lehine |
+  // idare_lehine | karma | usul | konusuz. Enum DEĞİL: beyin yeni bir değer gönderirse cevap düşmesin,
+  // web yalnız tanıdığı değerlere etiket basar.
+  karar_yonu: z.string().nullable().optional(),
 });
 export type BrainDocumentResult = z.infer<typeof BrainDocumentResultSchema>;
 
