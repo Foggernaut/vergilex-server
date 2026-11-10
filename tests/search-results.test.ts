@@ -244,12 +244,12 @@ describe('sonucuKaydet', () => {
       expect(fake.rows('search_results')).toHaveLength(0);
     });
 
-    it('okumalar supabase\'e hiç gitmez: boş küme / null', async () => {
+    it('okumalar supabase\'e hiç gitmez: ikisi de null (bilinmiyor)', async () => {
       fake.seed('search_results', [
         { id: 'r1', history_id: H1, user_id: U1, created_at: iso(Date.now() - 1 * DK), request: {}, response: {} },
       ]);
       expect(await kayitliSonuc(H1, U1)).toBeNull();
-      expect((await kayitliSonucIdleri([H1], U1)).size).toBe(0);
+      expect(await kayitliSonucIdleri([H1], U1)).toBeNull();
       expect(fake.callsFor('search_results')).toHaveLength(0);
     });
   });
@@ -340,7 +340,7 @@ describe('kayitliSonucIdleri', () => {
     ]);
 
     const idler = await kayitliSonucIdleri([H1, H2, H3], U1);
-    expect([...idler]).toEqual([H1]);
+    expect([...idler!]).toEqual([H1]);
   });
 
   it('yalnız history_id ve created_at seçer; response sütununu SEÇMEZ', async () => {
@@ -359,21 +359,39 @@ describe('kayitliSonucIdleri', () => {
 
   it('id listesi boşsa sorgu atılmaz', async () => {
     const idler = await kayitliSonucIdleri([], U1);
-    expect(idler.size).toBe(0);
+    expect(idler!.size).toBe(0);
     expect(fake.callsFor('search_results')).toHaveLength(0);
   });
 
-  it('tablo yokken (PGRST205) boş küme döner ve uyarı yazar; 500 vermez', async () => {
+  // R-F2: lookup hatası / saklama kapalı = "bilinmiyor" → null (boş küme DEĞİL: boş küme "hiçbirinin sonucu yok"
+  // demektir ve liste false etiketlerdi). Başarılı lookup her zaman Set döner.
+  it('tablo yokken (PGRST205) null döner ve uyarı yazar; fırlatmaz', async () => {
     fake.failOn('search_results', 'select', { code: 'PGRST205' });
     const idler = await kayitliSonucIdleri([H1], U1);
-    expect(idler.size).toBe(0);
+    expect(idler).toBeNull();
     expect(log.warn).toHaveBeenCalled();
   });
 
-  it('supabase çağrısı reddedilirse boş küme döner', async () => {
+  it('supabase çağrısı reddedilirse null döner', async () => {
     fake.failOn('search_results', 'select', new Error('fetch failed'));
+    expect(await kayitliSonucIdleri([H1], U1)).toBeNull();
+  });
+
+  it('5 sn AbortSignal zaman aşımı (reddedilen TimeoutError) null döner', async () => {
+    fake.failOn('search_results', 'select', new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+    expect(await kayitliSonucIdleri([H1], U1)).toBeNull();
+  });
+
+  it('saklama kapalıyken (0) null döner ve sorgu atılmaz', async () => {
+    env.BELGE_BUL_SONUC_SAKLAMA_GUN = 0;
+    expect(await kayitliSonucIdleri([H1], U1)).toBeNull();
+    expect(fake.callsFor('search_results')).toHaveLength(0);
+  });
+
+  it('başarılı ama eşleşme yoksa boş Set döner (null değil)', async () => {
     const idler = await kayitliSonucIdleri([H1], U1);
-    expect(idler.size).toBe(0);
+    expect(idler).toBeInstanceOf(Set);
+    expect(idler!.size).toBe(0);
   });
 });
 

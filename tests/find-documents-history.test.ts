@@ -384,21 +384,39 @@ describe('getDocumentHistory — has_results', () => {
     expect(fake.callsFor('search_results')).toHaveLength(0);
   });
 
-  it('tablo yokken (PGRST205) liste yine 200 döner, has_results hepsi false', async () => {
+  // R-F2: lookup hatasında has_results "bilinmiyor" → alan YOK (false değil): web false'u "ücretli yeniden
+  // çalıştır" diye etiketlerdi; alan yoksa eski serbest ön-doldurma davranışı.
+  it('tablo yokken (PGRST205) liste yine 200 döner, has_results alanı YOK (false değil)', async () => {
     fake.seed('search_history', [gecmis(H(1), 'u1', 1_000), gecmis(H(2), 'u1', 2_000)]);
     fake.failOn('search_results', 'select', { code: 'PGRST205', message: 'tablo yok' });
 
     const res = await request(app).get('/api/documents/history');
     expect(res.status).toBe(200);
-    expect(res.body.items.map((i: { has_results: boolean }) => i.has_results)).toEqual([false, false]);
+    expect(res.body.items.map((i: { id: string }) => i.id)).toEqual([H(1), H(2)]);
+    for (const i of res.body.items) expect(i).not.toHaveProperty('has_results');
+    expect(res.body.items[0]).toEqual(
+      expect.objectContaining({ query: `q-${H(1)}`, results_count: 3, filters: {}, created_at: expect.any(String) })
+    );
   });
 
-  it('saklama 0 iken has_results hepsi false, search_results sorgulanmaz', async () => {
-    env.BELGE_BUL_SONUC_SAKLAMA_GUN = 0;
+  it('supabase çağrısı reddedilirse (ağ hatası) liste 200, has_results alanı YOK', async () => {
     fake.seed('search_history', [gecmis(H(1))]);
+    fake.failOn('search_results', 'select', new Error('fetch failed'));
+
+    const res = await request(app).get('/api/documents/history');
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0]).not.toHaveProperty('has_results');
+  });
+
+  it('saklama 0 iken has_results alanı YOK (true "eski haline dön" anahtarı), search_results sorgulanmaz', async () => {
+    env.BELGE_BUL_SONUC_SAKLAMA_GUN = 0;
+    fake.seed('search_history', [gecmis(H(1)), gecmis(H(2), 'u1', 1_000)]);
     fake.seed('search_results', [{ id: 'r1', history_id: H(1), user_id: 'u1', created_at: iso(Date.now()) }]);
     const res = await request(app).get('/api/documents/history');
-    expect(res.body.items[0].has_results).toBe(false);
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(2);
+    for (const i of res.body.items) expect(i).not.toHaveProperty('has_results');
     expect(fake.callsFor('search_results')).toHaveLength(0);
   });
 });
@@ -445,6 +463,7 @@ describe('getSavedResults', () => {
     fake.seed('search_results', [kayit({ user_id: 'u2' })]);
     const res = await request(app).get(`/api/documents/history/${ID}/results`);
     expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('SAVED_RESULT_NOT_FOUND');
     expect(mocks.deductCredits).not.toHaveBeenCalled();
   });
 
@@ -452,17 +471,20 @@ describe('getSavedResults', () => {
     fake.seed('search_results', [kayit({ created_at: iso(Date.now() - 8 * GUN) })]);
     const res = await request(app).get(`/api/documents/history/${ID}/results`);
     expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('SAVED_RESULT_NOT_FOUND');
     expect(mocks.deductCredits).not.toHaveBeenCalled();
   });
 
   it('kayıt yok → 404', async () => {
     const res = await request(app).get(`/api/documents/history/${ID}/results`);
     expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('SAVED_RESULT_NOT_FOUND');
   });
 
   it('id uuid değilse 400 değil 404', async () => {
     const res = await request(app).get('/api/documents/history/abc/results');
     expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('SAVED_RESULT_NOT_FOUND');
     expect(fake.callsFor('search_results')).toHaveLength(0);
   });
 
@@ -491,6 +513,7 @@ describe('getSavedResults', () => {
   it('gerçekten yok (hata yok, satır yok) 503 değil 404', async () => {
     const res = await request(app).get(`/api/documents/history/${ID}/results`);
     expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('SAVED_RESULT_NOT_FOUND');
   });
 
   it('saklama 0 iken 404', async () => {
@@ -498,12 +521,14 @@ describe('getSavedResults', () => {
     fake.seed('search_results', [kayit()]);
     const res = await request(app).get(`/api/documents/history/${ID}/results`);
     expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('SAVED_RESULT_NOT_FOUND');
   });
 
   it('request alanı olmayan bozuk satır (sorgu yok) → 404, 500 değil', async () => {
     fake.seed('search_results', [kayit({ request: null })]);
     const res = await request(app).get(`/api/documents/history/${ID}/results`);
     expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('SAVED_RESULT_NOT_FOUND');
   });
 });
 

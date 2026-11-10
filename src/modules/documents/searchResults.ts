@@ -9,9 +9,11 @@ import type { BrainBrowseDocumentsResponse } from '../../brain/brain.types.js';
 //
 // Yazma (`sonucuKaydet`) ve liste etiketi (`kayitliSonucIdleri`) FAIL-OPEN: tablo yokken (migration 020
 // uygulanmadan deploy) ya da Supabase yavaş/ölüyken Belge Bul ve Geçmiş listesi çalışmaya devam eder —
-// hata yutulur, günlüğe yazılır. `kayitliSonuc` ise ÜÇ DURUMLU: "kayıt yok" (null) ile "okunamadı"
-// (503 AppError) ayrılır; web yalnız 404'te yeniden çalıştırır (2 KR), geçici DB hatası ücretli
-// yeniden çalıştırmaya dönmesin.
+// hata yutulur, günlüğe yazılır. `kayitliSonucIdleri` hata/saklama-kapalı durumunda `null` ("bilinmiyor")
+// döner; liste `has_results` alanını o zaman HİÇ yazmaz (false yazmak ücretli yeniden çalıştırma etiketi
+// olurdu), web eski serbest ön-doldurmaya düşer. `kayitliSonuc` ise ÜÇ DURUMLU: "kayıt yok" (null) ile
+// "okunamadı" (503 AppError) ayrılır; web yalnız 404 + SAVED_RESULT_NOT_FOUND kodunda yeniden çalıştırır
+// (2 KR), geçici DB hatası ya da uygulamanın genel rota 404'ü ücretli yeniden çalıştırmaya dönmesin.
 // Her Supabase çağrısı 5 sn ile sınırlıdır: server.ts'teki global undici Agent 420 sn başlık/gövde
 // zaman aşımı taşır ve Supabase'in fetch'i onu paylaşır; sınır olmazsa takılan bir çağrı dakikalarca asılı kalır.
 
@@ -149,10 +151,14 @@ const okunamadi = () => new AppError(503, 'SAVED_RESULT_UNAVAILABLE', 'Kayıtlı
 /**
  * Verilen geçmiş id'lerinden kayıtlı (süresi dolmamış) sonucu olanlar. Yalnız `history_id, created_at`
  * okur — `response` listeye ASLA taşınmaz. Gömülü ilişki (embed) yerine ayrı sorgu: tablo yokken liste kırılmaz.
+ *
+ * Dönüş: başarılı sorguda `Set` (boş olabilir: "hiçbirinin sonucu yok"); saklama kapalıyken (0) ya da sorgu
+ * hata verdiyse `null` = "bilinmiyor" → çağıran `has_results` alanını yazmamalıdır.
  */
-export async function kayitliSonucIdleri(historyIds: string[], userId: string): Promise<Set<string>> {
+export async function kayitliSonucIdleri(historyIds: string[], userId: string): Promise<Set<string> | null> {
   const gun = saklamaGun();
-  if (gun <= 0 || historyIds.length === 0) return new Set();
+  if (gun <= 0) return null;
+  if (historyIds.length === 0) return new Set();
   try {
     const { data, error } = await supabaseAdmin
       .from(TABLE)
@@ -163,11 +169,11 @@ export async function kayitliSonucIdleri(historyIds: string[], userId: string): 
       .abortSignal(sinir());
     if (error) {
       logger.warn('search_results ids lookup failed', { code: error.code, message: error.message });
-      return new Set();
+      return null;
     }
     return new Set((data ?? []).map((r: { history_id: string }) => r.history_id));
   } catch (err) {
     logger.warn('search_results ids lookup threw', { err: err instanceof Error ? err.message : err });
-    return new Set();
+    return null;
   }
 }

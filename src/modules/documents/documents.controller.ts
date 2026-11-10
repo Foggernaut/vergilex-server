@@ -153,7 +153,9 @@ export const getDocumentHistory: RequestHandler = async (req, res, next) => {
     const items: Array<{ id: string }> = hasMore ? rows.slice(0, limit) : rows;
 
     // has_results: yalnız dilimlenmiş sayfanın id'leri (limit+1'inci satır değil) için, ayrı hafif sorgu —
-    // `response` okunmaz; tablo yoksa kayitliSonucIdleri boş küme döner, liste kırılmaz.
+    // `response` okunmaz. Lookup hata verdiyse ya da saklama kapalıysa (0) kayitliSonucIdleri `null`
+    // ("bilinmiyor") döner: alan HİÇ yazılmaz (false = ücretli yeniden çalıştırma etiketi olurdu); web
+    // boolean olmayan değeri eski serbest ön-doldurma sayar. Liste her durumda 200 döner.
     const kayitli = await kayitliSonucIdleri(
       items.map((i) => i.id),
       req.user.id
@@ -162,22 +164,26 @@ export const getDocumentHistory: RequestHandler = async (req, res, next) => {
       page,
       limit,
       hasMore,
-      items: items.map((i) => ({ ...i, has_results: kayitli.has(i.id) })),
+      items: kayitli ? items.map((i) => ({ ...i, has_results: kayitli.has(i.id) })) : items,
     });
   } catch (err) {
     next(err);
   }
 };
 
+const kayitYok = () => new NotFoundError('Kayıtlı sonuç bulunamadı', 'SAVED_RESULT_NOT_FOUND');
+
 // Kayıtlı Belge Bul yanıtı (Geçmiş'ten tıklama). Kredi düşmez, beyne gidilmez, aiLimiter yok (genel sınır
 // yeterli). ÜÇ DURUMLU: bulundu → 200; gerçekten yok / süresi dolmuş / başkasının / geçersiz id / saklama
-// kapalı → 404 (web aramayı yeniden çalıştırır, 2 KR); Supabase hatası ya da zaman aşımı → 503 (kayitliSonuc
-// fırlatır; web yeniden çalıştırmaz, Geçmiş'te kalır). Geçersiz id 400 değil 404.
+// kapalı / bozuk satır → 404 + ÖZEL kod SAVED_RESULT_NOT_FOUND (web yalnız bu kodla aramayı yeniden çalıştırır,
+// 2 KR; uygulamanın genel rota 404'ü NOT_FOUND ya da kodsuz olduğundan ücretli yeniden çalıştırmayı tetiklemez);
+// Supabase hatası ya da zaman aşımı → 503 SAVED_RESULT_UNAVAILABLE (kayitliSonuc fırlatır; web yeniden
+// çalıştırmaz, Geçmiş'te kalır). Geçersiz id 400 değil 404.
 export const getSavedResults: RequestHandler = async (req, res, next) => {
   try {
     if (!req.user) throw new AuthError();
     const id = z.string().uuid().safeParse(req.params.id);
-    if (!id.success) throw new NotFoundError('Kayıtlı sonuç bulunamadı');
+    if (!id.success) throw kayitYok();
 
     const kayit = await kayitliSonuc(id.data, req.user.id);
     const saklananIstek = kayit?.request;
@@ -188,7 +194,7 @@ export const getSavedResults: RequestHandler = async (req, res, next) => {
       typeof saklananIstek !== 'object' ||
       typeof (saklananIstek as { query?: unknown }).query !== 'string'
     ) {
-      throw new NotFoundError('Kayıtlı sonuç bulunamadı');
+      throw kayitYok();
     }
 
     const { query, ...istek } = saklananIstek as { query: string } & Record<string, unknown>;
