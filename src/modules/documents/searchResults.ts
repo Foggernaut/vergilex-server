@@ -14,14 +14,20 @@ import type { BrainBrowseDocumentsResponse } from '../../brain/brain.types.js';
 // olurdu), web eski serbest ön-doldurmaya düşer. `kayitliSonuc` ise ÜÇ DURUMLU: "kayıt yok" (null) ile
 // "okunamadı" (503 AppError) ayrılır; web yalnız 404 + SAVED_RESULT_NOT_FOUND kodunda yeniden çalıştırır
 // (2 KR), geçici DB hatası ya da uygulamanın genel rota 404'ü ücretli yeniden çalıştırmaya dönmesin.
-// Her Supabase çağrısı 5 sn ile sınırlıdır: server.ts'teki global undici Agent 420 sn başlık/gövde
-// zaman aşımı taşır ve Supabase'in fetch'i onu paylaşır; sınır olmazsa takılan bir çağrı dakikalarca asılı kalır.
+// Her Supabase çağrısı sınırlıdır: server.ts'teki global undici Agent 420 sn başlık/gövde zaman aşımı taşır ve
+// Supabase'in fetch'i onu paylaşır; sınır olmazsa takılan bir çağrı dakikalarca asılı kalır. Küçük çağrılar
+// (temizlik, liste etiketi) 5 sn; tam yanıtı taşıyan yazma ve okuma 15 sn — büyük aramaların yanıtı MB'larca
+// (canlı 2026-11-11: 1.424 sonuç = 5,2 milyon karakter) ve yazma istemci yanıtından sonra, okuma tek tıkla olur.
 
 const TABLE = 'search_results';
 const GUN_MS = 24 * 60 * 60 * 1000;
 const CAGRI_ZAMAN_ASIMI_MS = 5_000;
-/** Bundan büyük yanıt (JSON.stringify uzunluğu) saklanmaz: bir satır jsonb'yi ve toplam boyutu şişirmesin. */
-const MAX_YANIT_KARAKTER = 2_000_000;
+const YANIT_CAGRI_ZAMAN_ASIMI_MS = 15_000;
+/**
+ * Bundan büyük yanıt (JSON.stringify uzunluğu) saklanmaz: olağan dışı bir yanıt tabloyu şişirmesin. Canlıda
+ * görülen en büyük arama (1.424 sonuç) 5,2 milyon karakter; son 30 günde aramaların ~1/6'sı 550+ sonuçlu.
+ */
+const MAX_YANIT_KARAKTER = 8_000_000;
 /** Toplu silme örnek (süreç) başına en çok bu aralıkla çalışır — her kayıtta taranmasın. */
 const TEMIZLIK_ARALIGI_MS = 5 * 60 * 1000;
 
@@ -33,6 +39,7 @@ function saklamaGun(): number {
 }
 
 const sinir = () => AbortSignal.timeout(CAGRI_ZAMAN_ASIMI_MS);
+const yanitSiniri = () => AbortSignal.timeout(YANIT_CAGRI_ZAMAN_ASIMI_MS);
 
 /** Saklama süresinin başlangıç eşiği (ISO): bundan eski kayıtların süresi dolmuştur. */
 function esikISO(gun: number): string {
@@ -89,7 +96,7 @@ export async function sonucuKaydet(a: {
         const { error } = await supabaseAdmin
           .from(TABLE)
           .insert({ history_id: a.historyId, user_id: a.userId, request: a.request, response: a.response })
-          .abortSignal(sinir());
+          .abortSignal(yanitSiniri());
         if (error) {
           logger.warn('search_results insert failed', {
             historyId: a.historyId,
@@ -111,7 +118,7 @@ export async function sonucuKaydet(a: {
 /**
  * Kayıtlı yanıt: yalnız sahibine ve süresi dolmamışsa döner.
  * - kayıt yok / süresi dolmuş / başkasının / saklama kapalı → `null` (gerçekten yok: controller 404).
- * - Supabase hatası ya da reddedilen çağrı (tablo yok PGRST205, 5 sn AbortSignal dahil) → 503 `AppError`
+ * - Supabase hatası ya da reddedilen çağrı (tablo yok PGRST205, 15 sn AbortSignal dahil) → 503 `AppError`
  *   fırlatır: "yok" ile "okunamadı" karışmasın, web geçici hatayı ücretli yeniden çalıştırmaya çevirmesin.
  */
 export async function kayitliSonuc(
@@ -129,7 +136,7 @@ export async function kayitliSonuc(
       .eq('history_id', historyId)
       .eq('user_id', userId)
       .gte('created_at', esikISO(gun))
-      .abortSignal(sinir())
+      .abortSignal(yanitSiniri())
       .maybeSingle();
   } catch (err) {
     logger.warn('search_results read threw', { historyId, err: err instanceof Error ? err.message : err });

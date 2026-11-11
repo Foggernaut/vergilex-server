@@ -179,11 +179,22 @@ describe('sonucuKaydet', () => {
     expect(fake.rows('search_results')).toHaveLength(0);
   });
 
-  it('her supabase çağrısı 5 sn AbortSignal ile sınırlanır', async () => {
+  it('her supabase çağrısı AbortSignal ile sınırlanır', async () => {
     await sonucuKaydet({ historyId: H1, userId: U1, request: istek, response: yanit() });
     const cagrilar = fake.callsFor('search_results');
     expect(cagrilar.length).toBeGreaterThanOrEqual(2); // insert + delete
     for (const c of cagrilar) expect(c.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('tam yanıtı yazan insert 15 sn, temizlik silmesi 5 sn sınır alır', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    try {
+      await sonucuKaydet({ historyId: H1, userId: U1, request: istek, response: yanit() });
+      // Çağrı sırası: önce insert, sonra delete.
+      expect(timeout.mock.calls.map((c) => c[0])).toEqual([15_000, 5_000]);
+    } finally {
+      timeout.mockRestore();
+    }
   });
 
   it('toplu silme en çok 5 dakikada bir çalışır (örnek başına)', async () => {
@@ -207,11 +218,21 @@ describe('sonucuKaydet', () => {
     expect(fake.callsFor('search_results', 'delete')).toHaveLength(1);
   });
 
-  it('yanıt 2.000.000 karakteri aşarsa kaydetmez ve uyarı yazar', async () => {
-    const dev = yanit({ documents: [{ chunk_id: 'c1', excerpt: 'a'.repeat(2_000_001) }] });
+  it('canlıdaki en büyük arama boyutundaki (5,2 milyon karakter) yanıtı kaydeder', async () => {
+    const buyuk = yanit({ documents: [{ chunk_id: 'c1', excerpt: 'a'.repeat(5_206_830) }] });
+    await sonucuKaydet({ historyId: H1, userId: U1, request: istek, response: buyuk });
+    expect(fake.callsFor('search_results', 'insert')).toHaveLength(1);
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('yanıt 8.000.000 karakteri aşarsa kaydetmez ve uyarı yazar', async () => {
+    const dev = yanit({ documents: [{ chunk_id: 'c1', excerpt: 'a'.repeat(8_000_001) }] });
     await sonucuKaydet({ historyId: H1, userId: U1, request: istek, response: dev });
     expect(fake.callsFor('search_results', 'insert')).toHaveLength(0);
-    expect(log.warn).toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledWith(
+      'search_results skipped: response too large',
+      expect.objectContaining({ max: 8_000_000 })
+    );
   });
 
   it('başarıda kaydedilen bayt sayısını günlüğe yazar', async () => {
@@ -266,8 +287,14 @@ describe('kayitliSonuc', () => {
     expect(await kayitliSonuc(H1, U1)).toEqual({ created_at: created, request, response });
   });
 
-  it('sorgu: history_id + user_id eşitliği, created_at >= now - 7 gün, maybeSingle, 5 sn sınır', async () => {
-    await kayitliSonuc(H1, U1);
+  it('sorgu: history_id + user_id eşitliği, created_at >= now - 7 gün, maybeSingle, 15 sn sınır', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    try {
+      await kayitliSonuc(H1, U1);
+      expect(timeout.mock.calls.map((c) => c[0])).toEqual([15_000]);
+    } finally {
+      timeout.mockRestore();
+    }
     const [c] = fake.callsFor('search_results', 'select');
     expect(c!.filters).toEqual([
       { op: 'eq', column: 'history_id', value: H1 },
@@ -318,7 +345,7 @@ describe('kayitliSonuc', () => {
       expect(log.warn).toHaveBeenCalled();
     });
 
-    it('5 sn AbortSignal zaman aşımı (reddedilen TimeoutError) 503 fırlatır', async () => {
+    it('AbortSignal zaman aşımı (reddedilen TimeoutError) 503 fırlatır', async () => {
       fake.failOn('search_results', 'select', new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
       await expect(kayitliSonuc(H1, U1)).rejects.toMatchObject(f503);
     });
