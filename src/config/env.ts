@@ -38,6 +38,14 @@ const envSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
 
   SIGNUP_BONUS_CREDITS: z.coerce.number().int().nonnegative().default(500),
+
+  // Belge Bul Geçmiş: arama sonuçlarının (search_results) saklanma süresi, gün. 0 = saklama KAPALI
+  // (kapatma anahtarı: yeni kayıt yok, tablo boşalır, okumalar boş döner). Boş string (Railway'de boş
+  // bırakılmış değişken) varsayılana düşer — aksi halde coerce '' → 0 olup saklamayı sessizce kapatırdı.
+  BELGE_BUL_SONUC_SAKLAMA_GUN: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.coerce.number().int().nonnegative().default(7)
+  ),
 });
 
 const parsed = envSchema.safeParse(process.env);
