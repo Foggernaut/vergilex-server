@@ -84,6 +84,7 @@ export const BrainDocumentResultSchema = z.object({
           sonuc: z.string(),
           ifade: z.string().nullable().optional(),
           donem: z.string().nullable().optional(),
+          kalan_belirtilmemis: z.boolean().nullable().optional(),
         })
         .passthrough(),
     )
