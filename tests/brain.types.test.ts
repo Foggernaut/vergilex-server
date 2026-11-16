@@ -566,7 +566,7 @@ describe('BrainDocumentResultSchema — karar_yonu (db 063 doğrulanmış karar 
 describe('BrainDocumentResultSchema — karar_yonu_kalemler (db 065 karma kararda konu bazlı yön)', () => {
   const kalemler = [
     { konu: 'vergi_asli', sonuc: 'idare', ifade: 'katma değer vergisi' },
-    { konu: 'vergi_ziyai_cezasi', sonuc: 'mukellef', ifade: 'tekerrür kısmı' },
+    { konu: 'vergi_ziyai_cezasi', sonuc: 'mukellef', ifade: 'tekerrür kısmı', donem: '2016' },
   ];
 
   it('kalemleri (ifade dahil) korur', () => {

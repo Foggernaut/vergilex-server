@@ -77,7 +77,16 @@ export const BrainDocumentResultSchema = z.object({
   // Karma kararda konu bazında yön (brain `karar_yonu_kalemler`; db 065): [{konu, sonuc, ifade}]. Konu/sonuç enum
   // DEĞİL (web tanımadığını atlar); bozuk değer belgeyi düşürmesin diye `.catch(null)` → alan null, rozet 'Kısmen'.
   karar_yonu_kalemler: z
-    .array(z.object({ konu: z.string(), sonuc: z.string(), ifade: z.string().nullable().optional() }).passthrough())
+    .array(
+      z
+        .object({
+          konu: z.string(),
+          sonuc: z.string(),
+          ifade: z.string().nullable().optional(),
+          donem: z.string().nullable().optional(),
+        })
+        .passthrough(),
+    )
     .nullable()
     .optional()
     .catch(null),
