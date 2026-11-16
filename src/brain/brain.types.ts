@@ -74,6 +74,13 @@ export const BrainDocumentResultSchema = z.object({
   // idare_lehine | karma | usul | konusuz. Enum DEĞİL: beyin yeni bir değer gönderirse cevap düşmesin,
   // web yalnız tanıdığı değerlere etiket basar.
   karar_yonu: z.string().nullable().optional(),
+  // Karma kararda konu bazında yön (brain `karar_yonu_kalemler`; db 065): [{konu, sonuc, ifade}]. Konu/sonuç enum
+  // DEĞİL (web tanımadığını atlar); bozuk değer belgeyi düşürmesin diye `.catch(null)` → alan null, rozet 'Kısmen'.
+  karar_yonu_kalemler: z
+    .array(z.object({ konu: z.string(), sonuc: z.string(), ifade: z.string().nullable().optional() }).passthrough())
+    .nullable()
+    .optional()
+    .catch(null),
 });
 export type BrainDocumentResult = z.infer<typeof BrainDocumentResultSchema>;
 

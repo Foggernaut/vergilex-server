@@ -562,3 +562,31 @@ describe('BrainDocumentResultSchema — karar_yonu (db 063 doğrulanmış karar 
     expect(BrainDocumentResultSchema.safeParse({ ...baseDoc, karar_yonu: 'yeni_deger' }).success).toBe(true);
   });
 });
+
+describe('BrainDocumentResultSchema — karar_yonu_kalemler (db 065 karma kararda konu bazlı yön)', () => {
+  const kalemler = [
+    { konu: 'vergi_asli', sonuc: 'idare', ifade: 'katma değer vergisi' },
+    { konu: 'vergi_ziyai_cezasi', sonuc: 'mukellef', ifade: 'tekerrür kısmı' },
+  ];
+
+  it('kalemleri (ifade dahil) korur', () => {
+    const p = BrainDocumentResultSchema.safeParse({ ...baseDoc, karar_yonu: 'karma', karar_yonu_kalemler: kalemler });
+    expect(p.success && p.data.karar_yonu_kalemler).toEqual(kalemler);
+  });
+
+  it('alan yok ya da null iken geçer; bilinmeyen konu dizgesi korunur (web süzer)', () => {
+    expect(BrainDocumentResultSchema.safeParse(baseDoc).success).toBe(true);
+    const n = BrainDocumentResultSchema.safeParse({ ...baseDoc, karar_yonu_kalemler: null });
+    expect(n.success && n.data.karar_yonu_kalemler).toBeNull();
+    const y = BrainDocumentResultSchema.safeParse({
+      ...baseDoc, karar_yonu_kalemler: [{ konu: 'yeni_konu', sonuc: 'mukellef' }],
+    });
+    expect(y.success && y.data.karar_yonu_kalemler).toEqual([{ konu: 'yeni_konu', sonuc: 'mukellef' }]);
+  });
+
+  it('bozuk değer belgeyi düşürmez, alan null olur', () => {
+    const p = BrainDocumentResultSchema.safeParse({ ...baseDoc, karar_yonu_kalemler: [{ konu: 3 }] });
+    expect(p.success).toBe(true);
+    expect(p.success && p.data.karar_yonu_kalemler).toBeNull();
+  });
+});
