@@ -108,14 +108,17 @@ export async function recordSearchHistory(row: {
   }
 }
 
-// Mesaj satırı kolonları. `kaynak_envanteri` (migration 018) ve `suggested_followups` (019, takip sorusu
-// önerileri) OPSİYONEL: ürün DB'sine henüz uygulanmadıysa sorgu yalnız eksik kolonsuz tekrar denenir
-// (withOptionalColumns) — kayıt/geçmiş kırılmaz, diğer kolon ve cevap sinyalleri korunur.
+// Mesaj satırı kolonları. `kaynak_envanteri` (migration 018), `suggested_followups` (019, takip sorusu
+// önerileri) ve `atif_kontrolu` + `kapsam_notu` (021, Radar 2026-11-20) OPSİYONEL: ürün DB'sine henüz
+// uygulanmadıysa sorgu yalnız eksik kolonsuz tekrar denenir (withOptionalColumns) — kayıt/geçmiş kırılmaz,
+// diğer kolon ve cevap sinyalleri korunur.
 const MSG_COLS =
   'id, role, content, sources, conflicts, confidence_score, not_found, credits_used, tokens_used, cost_usd, answer_length, engine, created_at, brain_request_id, feedback_rating';
 const ENVANTER_COL = 'kaynak_envanteri';
 const TAKIP_COL = 'suggested_followups';
-const OPTIONAL_COLS = [ENVANTER_COL, TAKIP_COL] as const;
+const ATIF_COL = 'atif_kontrolu';
+const KAPSAM_COL = 'kapsam_notu';
+const OPTIONAL_COLS = [ENVANTER_COL, TAKIP_COL, ATIF_COL, KAPSAM_COL] as const;
 const msgCols = (cols: ReadonlySet<string>): string =>
   [MSG_COLS, ...OPTIONAL_COLS.filter((c) => cols.has(c))].join(', ');
 
@@ -138,6 +141,8 @@ interface PersistedMessage {
     // Araştırma protokolü: kaynak envanteri (cevaptaki "Taranan kaynaklar" satırının yapısal hâli).
     kaynak_envanteri?: BrainAnswerResponse['kaynak_envanteri'] | null;
     suggested_followups?: string[] | null;
+    atif_kontrolu?: BrainAnswerResponse['atif_kontrolu'] | null;
+    kapsam_notu?: BrainAnswerResponse['kapsam_notu'] | null;
     position_level?: string | null;
     position_score?: number | null;
     position_rationale?: string | null;
@@ -279,6 +284,8 @@ export async function startConversation(args: {
         answer_length: length,
         engine,
         ...(cols.has(ENVANTER_COL) ? { kaynak_envanteri: answer.kaynak_envanteri ?? null } : {}),
+        ...(cols.has(ATIF_COL) ? { atif_kontrolu: answer.atif_kontrolu ?? null } : {}),
+        ...(cols.has(KAPSAM_COL) ? { kapsam_notu: answer.kapsam_notu ?? null } : {}),
         // Boş öneri listesi NULL saklanır (clarifying_questions gibi): "öneri yok" = "kaydedilmedi".
         ...(cols.has(TAKIP_COL)
           ? { suggested_followups: answer.suggested_followups.length ? answer.suggested_followups : null }
@@ -313,6 +320,8 @@ export async function startConversation(args: {
       ...answerSignalFields(answer),
       kaynak_envanteri: answer.kaynak_envanteri ?? null,
       suggested_followups: answer.suggested_followups,
+      atif_kontrolu: answer.atif_kontrolu ?? null,
+      kapsam_notu: answer.kapsam_notu ?? null,
     },
   };
 }
@@ -435,6 +444,8 @@ export async function followUp(args: {
         answer_length: length,
         engine,
         ...(cols.has(ENVANTER_COL) ? { kaynak_envanteri: answer.kaynak_envanteri ?? null } : {}),
+        ...(cols.has(ATIF_COL) ? { atif_kontrolu: answer.atif_kontrolu ?? null } : {}),
+        ...(cols.has(KAPSAM_COL) ? { kapsam_notu: answer.kapsam_notu ?? null } : {}),
         // Boş öneri listesi NULL saklanır (clarifying_questions gibi): "öneri yok" = "kaydedilmedi".
         ...(cols.has(TAKIP_COL)
           ? { suggested_followups: answer.suggested_followups.length ? answer.suggested_followups : null }
@@ -474,6 +485,8 @@ export async function followUp(args: {
       ...answerSignalFields(answer),
       kaynak_envanteri: answer.kaynak_envanteri ?? null,
       suggested_followups: answer.suggested_followups,
+      atif_kontrolu: answer.atif_kontrolu ?? null,
+      kapsam_notu: answer.kapsam_notu ?? null,
     },
   };
 }
