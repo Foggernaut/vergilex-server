@@ -42,7 +42,9 @@ export async function tazelikOku(
     if (error) throw error;
     return (data ?? []) as KorpusTazelikRow[];
   } catch (err) {
-    logger.warn('korpus_tazelik okunamadı — tazelik gösterilmiyor', { err: String(err) });
+    // PostgrestError düz nesnedir (Error değil): String(err) '[object Object]' verirdi.
+    const mesaj = err instanceof Error ? err.message : ((err as { message?: string })?.message ?? String(err));
+    logger.warn('korpus_tazelik okunamadı — tazelik gösterilmiyor', { err: mesaj });
     return [];
   }
 }

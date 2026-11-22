@@ -53,6 +53,15 @@ describe('tazelikOku', () => {
     expect(await tazelikOku(new Set(['danistay']), c as never)).toEqual([rowDanistay, rowOzelge]);
     expect(c.from).toHaveBeenCalledWith('korpus_tazelik');
   });
+  it('Supabase hata nesnesinin mesajı loga yazılır', async () => {
+    const { logger } = await import('../src/config/logger.js');
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => logger);
+    // PostgrestError düz nesnedir (Error değil) — String(err) '[object Object]' verir.
+    const c = fakeClient({ error: { message: 'relation "public.korpus_tazelik" does not exist', code: '42P01' } });
+    await tazelikOku(new Set(['danistay']), c as never);
+    expect(JSON.stringify(warn.mock.calls[0])).toContain('korpus_tazelik\\" does not exist');
+    warn.mockRestore();
+  });
   it('view hatası fail-open', async () => {
     const c = fakeClient({ error: new Error('relation "korpus_tazelik" does not exist') });
     expect(await tazelikOku(new Set(['danistay']), c as never)).toEqual([]);
