@@ -1,5 +1,6 @@
 import type { RequestHandler } from 'express';
 import { z } from 'zod';
+import { env } from '../../config/env.js';
 import { mevzuatDb } from '../../config/mevzuatDb.js';
 import { NotFoundError } from '../../utils/errors.js';
 import {
@@ -9,6 +10,7 @@ import {
   type CatalogItem,
   type CategoryCount,
 } from './catalog.types.js';
+import { parseTazelikKeys, tazelikEkle, tazelikOku } from './tazelik.js';
 
 // De-dupe rows that are identical across the visible fields (some source
 // tables — e.g. `laws` — hold repeated entries with distinct ids). Preserves
@@ -77,11 +79,14 @@ export const getCategories: RequestHandler = async (_req, res, next) => {
     );
 
     // Preserve the registry's display order and labels; default missing to 0.
-    const categories: CategoryCount[] = CATEGORIES.map((c) => ({
+    const counts: CategoryCount[] = CATEGORIES.map((c) => ({
       key: c.key,
       label: c.label,
       total: totals.get(c.key) ?? 0,
     }));
+    // Veri tazeliği: ayar boşsa view sorgulanmaz ve `counts` birebir döner; hata → tazeliksiz (fail-open).
+    const tazelikKeys = parseTazelikKeys(env.SISTEM_BELGELER_TAZELIK);
+    const categories = tazelikEkle(counts, await tazelikOku(tazelikKeys, mevzuatDb), tazelikKeys);
 
     categoriesCache = { at: Date.now(), data: categories };
     res.json({ categories });

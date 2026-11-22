@@ -42,6 +42,11 @@ const envSchema = z.object({
   // Belge Bul Geçmiş: arama sonuçlarının (search_results) saklanma süresi, gün. 0 = saklama KAPALI
   // (kapatma anahtarı: yeni kayıt yok, tablo boşalır, okumalar boş döner). Boş string (Railway'de boş
   // bırakılmış değişken) varsayılana düşer — aksi halde coerce '' → 0 olup saklamayı sessizce kapatırdı.
+  // Sistemdeki Belgeler veri tazeliği (mevzuat DB `korpus_tazelik`): virgüllü kategori anahtarları
+  // (ör. "danistay,ozelgeler"). Boş/yok = KAPALI — yanıt değişmez, view sorgulanmaz. Yalnız düzenli
+  // güncellenen kategoriler açılabilir (catalog.types.ts `tazelikKorpus`); diğer anahtarlar yok sayılır.
+  SISTEM_BELGELER_TAZELIK: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
+
   BELGE_BUL_SONUC_SAKLAMA_GUN: z.preprocess(
     (v) => (v === '' ? undefined : v),
     z.coerce.number().int().nonnegative().default(7)

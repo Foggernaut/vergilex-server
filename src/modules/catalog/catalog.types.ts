@@ -22,15 +22,20 @@ export interface CatalogCategory {
    * for small tables (< ~1000 rows) — never for özelge/makale/danıştay.
    */
   dedupe?: boolean;
+  /**
+   * Veri tazeliği (mevzuat DB `korpus_tazelik`, migration 066) bu kategori için hangi korpustan okunur.
+   * Yalnız düzenli/otomatik güncellenen korpuslar; gösterim ayrıca SISTEM_BELGELER_TAZELIK ayarına bağlı.
+   */
+  tazelikKorpus?: 'danistay' | 'ozelge';
 }
 
 // Order here = display order in the UI.
 export const CATEGORIES: readonly CatalogCategory[] = [
   { key: 'kanunlar',         view: 'catalog_kanunlar',         label: 'Kanunlar',                    orderBy: 'title', ascending: true, dedupe: true },
-  { key: 'ozelgeler',        view: 'catalog_ozelgeler',        label: 'Özelgeler',                   orderBy: 'title', ascending: true },
+  { key: 'ozelgeler',        view: 'catalog_ozelgeler',        label: 'Özelgeler',                   orderBy: 'title', ascending: true, tazelikKorpus: 'ozelge' },
   { key: 'makaleler',        view: 'catalog_makaleler',        label: 'Makaleler',                   orderBy: 'title', ascending: true },
   { key: 'doktrin',          view: 'catalog_doktrin',          label: 'Doktrin',                     orderBy: 'title', ascending: true },
-  { key: 'danistay',         view: 'catalog_danistay',         label: 'Danıştay Kararları',          orderBy: 'meta2', ascending: false }, // meta2 = tarih
+  { key: 'danistay',         view: 'catalog_danistay',         label: 'Danıştay Kararları',          orderBy: 'meta2', ascending: false, tazelikKorpus: 'danistay' }, // meta2 = tarih
   { key: 'soru_cevap',       view: 'catalog_soru_cevap',       label: 'Soru-Cevap',                  orderBy: 'title', ascending: true },
   { key: 'mali_ansiklopedi', view: 'catalog_mali_ansiklopedi', label: 'Mali Ansiklopedi',            orderBy: 'title', ascending: true },
   { key: 'bdk',              view: 'catalog_bdk',              label: 'Beyanname Düzenleme Kılavuzu', orderBy: 'title', ascending: true },
@@ -50,8 +55,17 @@ export interface CatalogItem {
   meta2: string | null;
 }
 
+/** Veri tazeliği — tarihler YYYY-MM-DD (Europe/Istanbul günü). */
+export interface KategoriTazelik {
+  son_guncelleme: string;
+  en_yeni_belge: string | null;
+  son_30_gun_eklenen: number;
+}
+
 export interface CategoryCount {
   key: string;
   label: string;
   total: number;
+  /** Yalnız SISTEM_BELGELER_TAZELIK'te açık kategorilerde; aksi halde anahtar hiç yok. */
+  tazelik?: KategoriTazelik;
 }
