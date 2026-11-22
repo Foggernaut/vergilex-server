@@ -308,6 +308,36 @@ export const BrainKaynakEnvanteriSchema = z.object({
 });
 export type BrainKaynakEnvanteri = z.infer<typeof BrainKaynakEnvanteriSchema>;
 
+// Radar 2026-11-20 — atıf kontrolü: cevaptaki her madde/karar/özelge atfının doğrulama durumu (beyin
+// services/atif_kontrolu.py). `durum`/`tur` bilerek düz string: beyin sözlüğü genişlerse yanıt kırılmasın.
+export const BrainAtifKontroluSchema = z.array(
+  z.object({
+    atif: z.string(),
+    tur: z.string(), // madde | karar | ozelge
+    durum: z.string(), // dogrulandi | incelenmeli | sorunlu
+    neden: z.string().default(''),
+  })
+);
+export type BrainAtifKontrolu = z.infer<typeof BrainAtifKontroluSchema>;
+
+// Radar 2026-11-20 — kapsam notu ("Taranan kaynaklar" kutusu): tür, durum, en güncel tarih, uyarılar
+// (beyin services/kapsam_notu.py).
+export const BrainKapsamNotuSchema = z.object({
+  kaynaklar: z.array(
+    z.object({
+      tur: z.string(),
+      ad: z.string(),
+      durum: z.string(), // tarandi | bulunamadi | ulasilamadi | secilmedi | kapali
+      sentez: z.number().int().default(0),
+      tarih: z.string().nullable().optional(),
+      tarih_turu: z.string().nullable().optional(), // belge | guncelleme
+      eski: z.boolean().default(false),
+    })
+  ),
+  uyarilar: z.array(z.string()).default([]),
+});
+export type BrainKapsamNotu = z.infer<typeof BrainKapsamNotuSchema>;
+
 export const BrainAnswerResponseSchema = z.object({
   answer: z.string(),
   sources: z.array(BrainDocumentResultSchema),
@@ -380,6 +410,9 @@ export const BrainAnswerResponseSchema = z.object({
   context_reset: z.boolean().nullable().optional(),
   context_mode: z.string().nullable().optional(), // followup | new_context
   kaynak_envanteri: BrainKaynakEnvanteriSchema.nullable().optional().catch(null),
+  // Radar 2026-11-20 (migration 021). `.catch(null)`: biçim kayarsa cevabın tamamı düşmesin.
+  atif_kontrolu: BrainAtifKontroluSchema.nullable().optional().catch(null),
+  kapsam_notu: BrainKapsamNotuSchema.nullable().optional().catch(null),
 });
 export type BrainAnswerResponse = z.infer<typeof BrainAnswerResponseSchema>;
 
