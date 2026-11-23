@@ -182,11 +182,13 @@ class Builder implements PromiseLike<FakeResult> {
     }
 
     if (call.op === 'delete') {
+      const removed = rows.filter(hit);
       this.fake.tables.set(
         call.table,
         rows.filter((r) => !hit(r))
       );
-      return { data: null, error: null };
+      // delete().select(cols) → returns the removed rows (PostgREST `return=representation`).
+      return call.columns ? this.shape(removed.map((r) => project(r, call.columns))) : { data: null, error: null };
     }
 
     let found = rows.filter(hit);

@@ -13,6 +13,9 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=builder /app/dist ./dist
+# ISO 27001 A.8.9 / CIS Docker 4.1: never run the app as root. The official
+# node image ships an unprivileged `node` user; the app only needs to read /app.
+USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget -qO- http://localhost:${PORT:-3000}/health || exit 1

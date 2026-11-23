@@ -1,0 +1,44 @@
+name: CI
+
+# ISO 27001 A.8.25/A.8.29 (secure SDLC + security testing): every push/PR runs
+# typecheck, the mocked test suite, a production-dependency audit and a secret scan.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Dependency audit (prod deps; blocks on critical)
+        # zod 3.x high advisory (memory exhaustion on oversized collections) is an
+        # accepted risk until the zod 4 migration — mitigated by the 256 KB JSON body
+        # limit (src/app.ts). Tighten to --audit-level=high after that migration.
+        run: npm audit --omit=dev --audit-level=critical
+
+  secrets:
+    # ISO 27001 A.8.4/A.8.28: block committed credentials (keys, tokens, DSNs).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks (full history, redacted output)
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" \
+            ghcr.io/gitleaks/gitleaks:v8.18.4 detect --source /repo --redact --no-banner -v
