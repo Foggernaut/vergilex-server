@@ -129,7 +129,8 @@ function assertCanAfford(userId: string): Promise<void> {
  * completion via `persist` (which reuses the buffered start/followUp path).
  * Falls back to a buffered brain call if the brain lacks the /stream endpoint.
  */
-async function pipe(
+/** Brain akışını istemciye aktarır (testlerde doğrudan çağrılır). */
+export async function pipe(
   sse: SseWriter,
   signal: AbortSignal,
   brainReq: BrainAnswerRequest,
@@ -156,6 +157,9 @@ async function pipe(
             firstDeltaLogged = true;
           }
           sse.event('answer_delta', { text: ev.text });
+        } else if (ev.type === 'answer_reset') {
+          // Model reddi: akan taslak atıldı, yedek model yeniden akıtacak.
+          sse.event('answer_reset', {});
         } else if (ev.type === 'error') {
           sse.event('error', { code: ev.code, message: ev.message });
           return;

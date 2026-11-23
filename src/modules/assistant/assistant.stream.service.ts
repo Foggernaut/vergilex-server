@@ -114,7 +114,8 @@ export async function streamAssistantFollowUp(
 
 // ── internals ──────────────────────────────────────────────────────────────
 
-async function pipe(
+/** Brain akışını istemciye aktarır (testlerde doğrudan çağrılır). */
+export async function pipe(
   sse: SseWriter,
   signal: AbortSignal,
   brainReq: BrainAnswerRequest,
@@ -135,6 +136,9 @@ async function pipe(
           sse.event('layer2', { corpus: ev.corpus, label: ev.label, summary: ev.summary });
         } else if (ev.type === 'layer3_delta') {
           sse.event('layer3_delta', { text: ev.text });
+        } else if (ev.type === 'layer3_reset') {
+          // Model reddi: akan essay taslağı atıldı, yedek model yeniden akıtacak.
+          sse.event('layer3_reset', {});
         } else if (ev.type === 'error') {
           sse.event('error', { code: ev.code, message: ev.message });
           return;

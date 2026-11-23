@@ -182,57 +182,7 @@ export class BrainClient {
   }
 
   private parseSseFrame(frame: string): BrainStreamEvent | null {
-    let event = 'message';
-    const dataLines: string[] = [];
-    for (const line of frame.split('\n')) {
-      if (!line || line.startsWith(':')) continue; // heartbeat / comment
-      if (line.startsWith('event:')) event = line.slice(6).trim();
-      else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''));
-    }
-    if (dataLines.length === 0) return null;
-    const raw = dataLines.join('\n');
-    let data: unknown;
-    try {
-      data = JSON.parse(raw);
-    } catch {
-      return null;
-    }
-    const obj = data as Record<string, unknown>;
-    switch (event) {
-      case 'phase':
-        return { type: 'phase', phase: String(obj.phase ?? '') };
-      case 'answer_delta':
-        return { type: 'answer_delta', text: String(obj.text ?? '') };
-      case 'layer1':
-        return { type: 'layer1', documents: (obj.documents ?? []) as BrainDocumentResult[] };
-      case 'layer2':
-        return {
-          type: 'layer2',
-          corpus: String(obj.corpus ?? ''),
-          label: String(obj.label ?? ''),
-          summary: String(obj.summary ?? ''),
-        };
-      case 'layer3_delta':
-        return { type: 'layer3_delta', text: String(obj.text ?? '') };
-      case 'error':
-        return {
-          type: 'error',
-          code: String(obj.code ?? 'BRAIN_ERROR'),
-          message: String(obj.message ?? ''),
-        };
-      case 'complete': {
-        const parsed = BrainAnswerResponseSchema.safeParse(data);
-        if (!parsed.success) {
-          logger.error('Brain stream complete schema mismatch', {
-            issues: parsed.error.flatten(),
-          });
-          throw new BrainSchemaError(parsed.error);
-        }
-        return { type: 'complete', response: parsed.data };
-      }
-      default:
-        return null;
-    }
+    return parseBrainSseFrame(frame);
   }
 
   async submitFeedback(req: BrainFeedbackRequest): Promise<BrainFeedbackResponse> {
@@ -623,3 +573,62 @@ export const brainClient = new BrainClient({
   apiKey: env.BRAIN_API_KEY,
   timeoutMs: env.BRAIN_TIMEOUT_MS,
 });
+
+/** Tek SSE çerçevesini (event/data satırları) BrainStreamEvent'e çevirir; tanınmayan → null. */
+export function parseBrainSseFrame(frame: string): BrainStreamEvent | null {
+  let event = 'message';
+  const dataLines: string[] = [];
+  for (const line of frame.split('\n')) {
+    if (!line || line.startsWith(':')) continue; // heartbeat / comment
+    if (line.startsWith('event:')) event = line.slice(6).trim();
+    else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''));
+  }
+  if (dataLines.length === 0) return null;
+  const raw = dataLines.join('\n');
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const obj = data as Record<string, unknown>;
+  switch (event) {
+    case 'phase':
+      return { type: 'phase', phase: String(obj.phase ?? '') };
+    case 'answer_delta':
+      return { type: 'answer_delta', text: String(obj.text ?? '') };
+    case 'layer1':
+      return { type: 'layer1', documents: (obj.documents ?? []) as BrainDocumentResult[] };
+    case 'layer2':
+      return {
+        type: 'layer2',
+        corpus: String(obj.corpus ?? ''),
+        label: String(obj.label ?? ''),
+        summary: String(obj.summary ?? ''),
+      };
+    case 'layer3_delta':
+      return { type: 'layer3_delta', text: String(obj.text ?? '') };
+    case 'answer_reset':
+      return { type: 'answer_reset' };
+    case 'layer3_reset':
+      return { type: 'layer3_reset' };
+    case 'error':
+      return {
+        type: 'error',
+        code: String(obj.code ?? 'BRAIN_ERROR'),
+        message: String(obj.message ?? ''),
+      };
+    case 'complete': {
+      const parsed = BrainAnswerResponseSchema.safeParse(data);
+      if (!parsed.success) {
+        logger.error('Brain stream complete schema mismatch', {
+          issues: parsed.error.flatten(),
+        });
+        throw new BrainSchemaError(parsed.error);
+      }
+      return { type: 'complete', response: parsed.data };
+    }
+    default:
+      return null;
+  }
+}
