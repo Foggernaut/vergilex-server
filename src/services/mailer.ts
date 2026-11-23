@@ -66,7 +66,8 @@ export async function sendAnswerPdf(to: string, opts: SendAnswerPdfOpts): Promis
   });
 
   if (error) {
-    logger.error('Resend e-posta gönderimi başarısız', { err: error.message, to });
+    // KVKK: no raw recipient address in logs (domain is enough to triage).
+    logger.error('Resend e-posta gönderimi başarısız', { err: error.message, toDomain: to.split('@')[1] ?? '?' });
     throw new AppError(502, 'MAIL_SEND_FAILED', 'E-posta gönderilemedi, lütfen tekrar deneyin');
   }
 }
