@@ -36,6 +36,10 @@ ALTER FUNCTION public.set_updated_at()  SET search_path = public, pg_temp;
 -- Catch-all for any function created out-of-band in the dashboard.
 REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO service_role;
+-- Belt-and-braces for the signup trigger: Postgres checks trigger-function EXECUTE
+-- at CREATE TRIGGER time, not at fire time, but an explicit grant to the role that
+-- inserts into auth.users guarantees signups can never break on this migration.
+GRANT  EXECUTE ON FUNCTION public.handle_new_user() TO supabase_auth_admin;
 
 -- ── 2. Tables: no client writes; anon reads nothing ─────────────────────────
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
