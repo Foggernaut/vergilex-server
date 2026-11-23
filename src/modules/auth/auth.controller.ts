@@ -4,9 +4,16 @@ import { loginSchema, signupSchema } from './auth.schema.js';
 import { AuthError } from '../../utils/errors.js';
 import { logger } from '../../config/logger.js';
 
+/** a***@example.com — enough to correlate support tickets, not a raw identifier. */
+function maskEmail(email: string): string {
+  const [u, d] = email.split('@');
+  return d ? `${(u ?? '').slice(0, 1)}***@${d}` : '***';
+}
+
 export const signup: RequestHandler = async (req, res, next) => {
   try {
-    const { email, password, full_name } = signupSchema.parse(req.body);
+    const { email, password, full_name, terms_version, privacy_notice_version } =
+      signupSchema.parse(req.body);
 
     const { data, error } = await supabaseAnon.auth.signUp({
       email,
@@ -15,10 +22,24 @@ export const signup: RequestHandler = async (req, res, next) => {
     });
 
     if (error) {
-      logger.warn('Signup failed', { email, error: error.message });
-      throw new AuthError(error.message, 'SIGNUP_FAILED');
+      // SECURITY: no raw email in logs; never echo Supabase's message (it reveals
+      // whether an account exists → enumeration). Only actionable codes pass.
+      logger.warn('Signup failed', { email: maskEmail(email), code: error.code ?? 'unknown' });
+      if (error.code === 'weak_password') {
+        throw new AuthError('Şifre yeterince güçlü değil; daha uzun ve tahmin edilmesi zor bir şifre seçin.', 'WEAK_PASSWORD');
+      }
+      throw new AuthError('Kayıt tamamlanamadı. Bilgilerinizi kontrol edip tekrar deneyin.', 'SIGNUP_FAILED');
     }
     if (!data.user) throw new AuthError('Kayıt başarısız', 'SIGNUP_FAILED');
+
+    // KVKK md.10: hangi metin sürümünün ne zaman kabul edildiğini kaydet (migration 023).
+    const { error: consentErr } = await supabaseAdmin
+      .from('users')
+      .update({ terms_version, privacy_notice_version, terms_accepted_at: new Date().toISOString() })
+      .eq('id', data.user.id);
+    if (consentErr) {
+      logger.error('Signup: legal acceptance not recorded', { userId: data.user.id, err: consentErr.message });
+    }
 
     res.status(201).json({
       user: { id: data.user.id, email: data.user.email },

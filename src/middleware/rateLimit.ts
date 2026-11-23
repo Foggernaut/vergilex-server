@@ -28,3 +28,12 @@ export const mailLimiter = rateLimit({
   keyGenerator: (req) => req.user?.id ?? req.ip ?? 'anon',
   message: { error: { code: 'RATE_LIMITED', message: 'E-posta gönderim limiti aşıldı, lütfen sonra tekrar deneyin' } },
 });
+
+// Login / signup — brute-force & credential-stuffing guard: 20 attempts / 15 min per IP.
+export const authLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMITED', message: 'Çok fazla deneme, lütfen 15 dakika sonra tekrar deneyin' } },
+});

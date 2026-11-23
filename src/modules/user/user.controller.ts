@@ -2,7 +2,8 @@ import { brainClient } from '../../brain/brain.client.js';
 import type { RequestHandler } from 'express';
 import { z } from 'zod';
 import { supabaseAdmin } from '../../config/supabase.js';
-import { AuthError, NotFoundError } from '../../utils/errors.js';
+import { AppError, AuthError, NotFoundError } from '../../utils/errors.js';
+import { deleteAccount, exportUserData } from './privacy.service.js';
 import { getBalance, listTransactions } from '../credits/credits.service.js';
 
 const updateProfileSchema = z.object({
@@ -88,6 +89,41 @@ export const getHistory: RequestHandler = async (req, res, next) => {
     }
     if (error) throw error;
     res.json({ history: data ?? [] });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── KVKK md.11 veri sahibi hakları ──────────────────────────────────────────
+
+/** GET /api/user/me/export — kullanıcının tüm verisi (JSON, indirilebilir). */
+export const exportMyData: RequestHandler = async (req, res, next) => {
+  try {
+    if (!req.user) throw new AuthError();
+    const data = await exportUserData(req.user.id);
+    const day = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Disposition', `attachment; filename="vergilex-verilerim-${day}.json"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+const deleteAccountSchema = z.object({
+  confirm_email: z.string().trim().min(3).max(320),
+});
+
+/** DELETE /api/user/me — hesabı ve tüm verileri kalıcı olarak siler (e-posta onayı ister). */
+export const deleteMyAccount: RequestHandler = async (req, res, next) => {
+  try {
+    if (!req.user) throw new AuthError();
+    const { confirm_email } = deleteAccountSchema.parse(req.body ?? {});
+    if (confirm_email.toLowerCase() !== (req.user.email ?? '').trim().toLowerCase()) {
+      throw new AppError(400, 'CONFIRMATION_MISMATCH', 'Onay için hesabınızın e-posta adresini yazın.');
+    }
+    await deleteAccount(req.user.id);
+    res.status(204).end();
   } catch (err) {
     next(err);
   }

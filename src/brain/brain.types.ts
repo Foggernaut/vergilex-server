@@ -475,6 +475,16 @@ export const BrainFeedbackResponseSchema = z.object({
 });
 export type BrainFeedbackResponse = z.infer<typeof BrainFeedbackResponseSchema>;
 
+// --- v2 privacy erase (KVKK md.11 hesap silme) ---
+
+export const BrainEraseResponseSchema = z.object({
+  ok: z.boolean(),
+  requests_deleted: z.number().int(),
+  feedback_deleted: z.number().int(),
+  error: z.string().nullable().optional(),
+});
+export type BrainEraseResponse = z.infer<typeof BrainEraseResponseSchema>;
+
 // --- v2 analyze-document ---
 
 export const BrainAnalyzeChunkPreviewSchema = z.object({

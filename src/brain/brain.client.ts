@@ -21,6 +21,8 @@ import {
   type BrainFeedbackRequest,
   type BrainFeedbackResponse,
   BrainFeedbackResponseSchema,
+  type BrainEraseResponse,
+  BrainEraseResponseSchema,
   type BrainFindDocumentsRequest,
   type BrainFindDocumentsResponse,
   BrainFindDocumentsResponseSchema,
@@ -231,6 +233,11 @@ export class BrainClient {
 
   async submitFeedback(req: BrainFeedbackRequest): Promise<BrainFeedbackResponse> {
     return this.post('/v2/feedback', req, BrainFeedbackResponseSchema);
+  }
+
+  /** KVKK md.11: hesap silmeden ÖNCE kullanıcının audit izini sildir (503 → hata). */
+  async eraseAuditTrail(req: { request_ids: string[]; user_id: string }): Promise<BrainEraseResponse> {
+    return this.post('/v2/privacy/erase', req, BrainEraseResponseSchema);
   }
 
   async analyzeDocument(input: {

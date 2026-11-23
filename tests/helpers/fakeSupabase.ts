@@ -13,7 +13,7 @@ export interface FakeFilter {
 
 export interface FakeCall {
   table: string;
-  op: 'select' | 'insert' | 'delete';
+  op: 'select' | 'insert' | 'update' | 'delete';
   /** select(...) argümanı; insert(...).select(...) için döndürülen sütunlar. */
   columns: string | null;
   payload: unknown;
@@ -91,6 +91,11 @@ class Builder implements PromiseLike<FakeResult> {
     this.call.payload = payload;
     return this;
   }
+  update(payload: unknown) {
+    this.call.op = 'update';
+    this.call.payload = payload;
+    return this;
+  }
   delete() {
     this.call.op = 'delete';
     return this;
@@ -163,6 +168,17 @@ class Builder implements PromiseLike<FakeResult> {
       };
       rows.push(row);
       return this.shape(call.columns ? [project(row, call.columns)] : []);
+    }
+
+    if (call.op === 'update') {
+      const changed: Row[] = [];
+      for (const r of rows) {
+        if (hit(r)) {
+          Object.assign(r, (call.payload ?? {}) as Row);
+          changed.push(r);
+        }
+      }
+      return this.shape(call.columns ? changed.map((r) => project(r, call.columns)) : []);
     }
 
     if (call.op === 'delete') {
