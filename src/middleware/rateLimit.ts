@@ -29,10 +29,13 @@ export const mailLimiter = rateLimit({
   message: { error: { code: 'RATE_LIMITED', message: 'E-posta gönderim limiti aşıldı, lütfen sonra tekrar deneyin' } },
 });
 
-// Login / signup — brute-force & credential-stuffing guard: 20 attempts / 15 min per IP.
+// Login / signup — brute-force & credential-stuffing guard: 20 FAILED attempts /
+// 15 min per IP. Successful logins/signups (status < 400) don't consume the budget,
+// so users behind a shared IP (office NAT) aren't locked out by normal use.
 export const authLimiter = rateLimit({
   windowMs: 15 * 60_000,
   limit: 20,
+  skipSuccessfulRequests: true,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: { code: 'RATE_LIMITED', message: 'Çok fazla deneme, lütfen 15 dakika sonra tekrar deneyin' } },

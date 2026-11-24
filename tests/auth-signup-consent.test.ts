@@ -69,6 +69,33 @@ describe('POST /api/auth/signup', () => {
     expect(upd!.filters).toContainEqual({ op: 'eq', column: 'id', value: 'new-user' });
   });
 
+  it('logs (error level, user id only) when the acceptance record updates 0 rows — signup still succeeds', async () => {
+    fake.reset(); // no public.users row for the new auth user
+    const res = await request(app).post('/api/auth/signup').set('X-Forwarded-For', fresh()).send(BODY);
+    expect(res.status).toBe(201);
+    expect(mocks.log.error).toHaveBeenCalledWith(
+      'Signup: legal acceptance not recorded',
+      expect.objectContaining({ userId: 'new-user' })
+    );
+    expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain('ayse@example.com');
+  });
+
+  it('logs when the acceptance update errors — signup still succeeds', async () => {
+    fake.failOn('users', 'update', { message: 'column "terms_version" does not exist' });
+    const res = await request(app).post('/api/auth/signup').set('X-Forwarded-For', fresh()).send(BODY);
+    expect(res.status).toBe(201);
+    expect(mocks.log.error).toHaveBeenCalledWith(
+      'Signup: legal acceptance not recorded',
+      expect.objectContaining({ userId: 'new-user' })
+    );
+  });
+
+  it('does not log an error when the acceptance record is written', async () => {
+    const res = await request(app).post('/api/auth/signup').set('X-Forwarded-For', fresh()).send(BODY);
+    expect(res.status).toBe(201);
+    expect(mocks.log.error).not.toHaveBeenCalled();
+  });
+
   it('does not leak the Supabase error text or log the raw email', async () => {
     mocks.signUp.mockResolvedValue({
       data: { user: null, session: null },
@@ -101,5 +128,18 @@ describe('auth brute-force limiter', () => {
         .send({ email: 'a@b.co', password: 'x' });
     }
     expect(last!.status).toBe(429);
+  });
+
+  it('successful logins do not consume the budget', async () => {
+    mocks.signIn.mockResolvedValue({
+      data: { session: { access_token: 't' }, user: { id: 'u', email: 'a@b.co' } },
+      error: null,
+    });
+    const addr = fresh();
+    for (let i = 0; i < 25; i++) {
+      const res = await request(app).post('/api/auth/login').set('X-Forwarded-For', addr)
+        .send({ email: 'a@b.co', password: 'x' });
+      expect(res.status).toBe(200);
+    }
   });
 });

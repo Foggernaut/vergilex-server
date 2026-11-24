@@ -33,12 +33,19 @@ export const signup: RequestHandler = async (req, res, next) => {
     if (!data.user) throw new AuthError('Kayıt başarısız', 'SIGNUP_FAILED');
 
     // KVKK md.10: hangi metin sürümünün ne zaman kabul edildiğini kaydet (migration 023).
-    const { error: consentErr } = await supabaseAdmin
+    // Kayıt başarısı bundan bağımsızdır (hesap zaten açıldı), ama kayıt düşmezse
+    // (hata VEYA 0 satır — ör. handle_new_user profili henüz yazmadıysa) ispat kaydı
+    // eksik kalır: error seviyesinde logla (yalnız user id, e-posta yok).
+    const { data: consentRows, error: consentErr } = await supabaseAdmin
       .from('users')
       .update({ terms_version, privacy_notice_version, terms_accepted_at: new Date().toISOString() })
-      .eq('id', data.user.id);
-    if (consentErr) {
-      logger.error('Signup: legal acceptance not recorded', { userId: data.user.id, err: consentErr.message });
+      .eq('id', data.user.id)
+      .select('id');
+    if (consentErr || !consentRows?.length) {
+      logger.error('Signup: legal acceptance not recorded', {
+        userId: data.user.id,
+        err: consentErr?.message ?? 'no users row updated (0 rows)',
+      });
     }
 
     res.status(201).json({

@@ -27,8 +27,11 @@ scheduleRetention();
 // ── Inbound header budget ────────────────────────────────────────────────────
 // Historically the assistant EventSource carried the 4000-char question + JWT in
 // the query string (10–24 KB request line). Since the stream-ticket change
-// (SECURITY P0, 2026-11-23) the URL carries only `?ticket=`; 64 KB is kept as
-// headroom for older clients during rollout and can be lowered afterwards.
+// (SECURITY P0, 2026-11-23) the URL carries only `?ticket=`. There is NO
+// backward compatibility for older clients: the legacy `?access_token=&query=`
+// stream form is refused (400) and signup requires the terms/privacy version
+// fields — deploy web and server together. 64 KB is merely leftover headroom
+// and can be lowered once nothing else needs it.
 const MAX_HEADER_BYTES = 64 * 1024;
 
 const server = createServer({ maxHeaderSize: MAX_HEADER_BYTES }, app).listen(env.PORT, () => {
