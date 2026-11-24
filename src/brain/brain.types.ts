@@ -338,6 +338,36 @@ export const BrainKapsamNotuSchema = z.object({
 });
 export type BrainKapsamNotu = z.infer<typeof BrainKapsamNotuSchema>;
 
+// Faz 4a — Kaynak Dökümü: karar ve muktezaların YÖNE göre özeti; cevabın altında ayrı kutu (beyin
+// services/cevap_ayristirma.py). `yon` bilerek düz string (olumlu | olumsuz | karma | bilinmiyor).
+export const BrainKaynakDokumuSchema = z.array(
+  z.object({
+    kategori: z.string(),
+    yon: z.string().default('bilinmiyor'),
+    kaynaklar: z
+      .array(
+        z.object({
+          kunye: z.string(),
+          kaynak_no: z.array(z.number().int()).default([]),
+          ayrinti: z.string().default(''),
+        })
+      )
+      .default([]),
+  })
+);
+export type BrainKaynakDokumu = z.infer<typeof BrainKaynakDokumuSchema>;
+
+// Faz 4a — otomatik teyit/kapsam notları (beyin services/not_toplayici.py). `onem`: bilgi | uyari | kritik.
+export const BrainNotlarSchema = z.array(
+  z.object({
+    tur: z.string(),
+    metin: z.string(),
+    onem: z.string().default('uyari'),
+    kaynak_no: z.number().int().nullable().optional(),
+  })
+);
+export type BrainNotlar = z.infer<typeof BrainNotlarSchema>;
+
 export const BrainAnswerResponseSchema = z.object({
   answer: z.string(),
   sources: z.array(BrainDocumentResultSchema),
@@ -413,6 +443,9 @@ export const BrainAnswerResponseSchema = z.object({
   // Radar 2026-11-20 (migration 021). `.catch(null)`: biçim kayarsa cevabın tamamı düşmesin.
   atif_kontrolu: BrainAtifKontroluSchema.nullable().optional().catch(null),
   kapsam_notu: BrainKapsamNotuSchema.nullable().optional().catch(null),
+  // Faz 4a (migration 025). Beyin DOKUM_KIPI/NOT_KIPI=yapisal iken döner; metin kipinde yok (tablo cevabın içinde).
+  kaynak_dokumu: BrainKaynakDokumuSchema.nullable().optional().catch(null),
+  notlar: BrainNotlarSchema.nullable().optional().catch(null),
 });
 export type BrainAnswerResponse = z.infer<typeof BrainAnswerResponseSchema>;
 

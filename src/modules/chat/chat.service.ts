@@ -118,8 +118,11 @@ const ENVANTER_COL = 'kaynak_envanteri';
 const TAKIP_COL = 'suggested_followups';
 const ATIF_COL = 'atif_kontrolu';
 const KAPSAM_COL = 'kapsam_notu';
-const OPTIONAL_COLS = [ENVANTER_COL, TAKIP_COL, ATIF_COL, KAPSAM_COL] as const;
-const msgCols = (cols: ReadonlySet<string>): string =>
+// Faz 4a (migration 025): Kaynak Dökümü tablosu + otomatik notlar cevap metninden yapısal alana.
+const DOKUM_COL = 'kaynak_dokumu';
+const NOTLAR_COL = 'notlar';
+export const OPTIONAL_COLS = [ENVANTER_COL, TAKIP_COL, ATIF_COL, KAPSAM_COL, DOKUM_COL, NOTLAR_COL] as const;
+export const msgCols = (cols: ReadonlySet<string>): string =>
   [MSG_COLS, ...OPTIONAL_COLS.filter((c) => cols.has(c))].join(', ');
 
 interface PersistedMessage {
@@ -143,6 +146,8 @@ interface PersistedMessage {
     suggested_followups?: string[] | null;
     atif_kontrolu?: BrainAnswerResponse['atif_kontrolu'] | null;
     kapsam_notu?: BrainAnswerResponse['kapsam_notu'] | null;
+    kaynak_dokumu?: BrainAnswerResponse['kaynak_dokumu'] | null;
+    notlar?: BrainAnswerResponse['notlar'] | null;
     position_level?: string | null;
     position_score?: number | null;
     position_rationale?: string | null;
@@ -286,6 +291,8 @@ export async function startConversation(args: {
         ...(cols.has(ENVANTER_COL) ? { kaynak_envanteri: answer.kaynak_envanteri ?? null } : {}),
         ...(cols.has(ATIF_COL) ? { atif_kontrolu: answer.atif_kontrolu ?? null } : {}),
         ...(cols.has(KAPSAM_COL) ? { kapsam_notu: answer.kapsam_notu ?? null } : {}),
+        ...(cols.has(DOKUM_COL) ? { kaynak_dokumu: answer.kaynak_dokumu ?? null } : {}),
+        ...(cols.has(NOTLAR_COL) ? { notlar: answer.notlar ?? null } : {}),
         // Boş öneri listesi NULL saklanır (clarifying_questions gibi): "öneri yok" = "kaydedilmedi".
         ...(cols.has(TAKIP_COL)
           ? { suggested_followups: answer.suggested_followups.length ? answer.suggested_followups : null }
@@ -322,6 +329,8 @@ export async function startConversation(args: {
       suggested_followups: answer.suggested_followups,
       atif_kontrolu: answer.atif_kontrolu ?? null,
       kapsam_notu: answer.kapsam_notu ?? null,
+      kaynak_dokumu: answer.kaynak_dokumu ?? null,
+      notlar: answer.notlar ?? null,
     },
   };
 }
@@ -446,6 +455,8 @@ export async function followUp(args: {
         ...(cols.has(ENVANTER_COL) ? { kaynak_envanteri: answer.kaynak_envanteri ?? null } : {}),
         ...(cols.has(ATIF_COL) ? { atif_kontrolu: answer.atif_kontrolu ?? null } : {}),
         ...(cols.has(KAPSAM_COL) ? { kapsam_notu: answer.kapsam_notu ?? null } : {}),
+        ...(cols.has(DOKUM_COL) ? { kaynak_dokumu: answer.kaynak_dokumu ?? null } : {}),
+        ...(cols.has(NOTLAR_COL) ? { notlar: answer.notlar ?? null } : {}),
         // Boş öneri listesi NULL saklanır (clarifying_questions gibi): "öneri yok" = "kaydedilmedi".
         ...(cols.has(TAKIP_COL)
           ? { suggested_followups: answer.suggested_followups.length ? answer.suggested_followups : null }
@@ -487,6 +498,8 @@ export async function followUp(args: {
       suggested_followups: answer.suggested_followups,
       atif_kontrolu: answer.atif_kontrolu ?? null,
       kapsam_notu: answer.kapsam_notu ?? null,
+      kaynak_dokumu: answer.kaynak_dokumu ?? null,
+      notlar: answer.notlar ?? null,
     },
   };
 }
