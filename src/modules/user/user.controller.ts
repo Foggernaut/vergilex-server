@@ -5,21 +5,28 @@ import { supabaseAdmin } from '../../config/supabase.js';
 import { AppError, AuthError, NotFoundError } from '../../utils/errors.js';
 import { deleteAccount, exportUserData } from './privacy.service.js';
 import { getBalance, listTransactions } from '../credits/credits.service.js';
+import { LEGAL_VERSIONS, toProfile } from '../legal/legal.js';
 
 const updateProfileSchema = z.object({
   full_name: z.string().min(1).max(120),
 });
 
+const acceptTermsSchema = z.object({
+  terms_version: z.string().min(1).max(40),
+  privacy_notice_version: z.string().min(1).max(40),
+});
+
 export const getProfile: RequestHandler = async (req, res, next) => {
   try {
     if (!req.user) throw new AuthError();
+    // `*` + toProfile: consent columns included when migration 023 exists.
     const { data, error } = await supabaseAdmin
       .from('users')
-      .select('id, email, full_name, role, credits, created_at, updated_at')
+      .select('*')
       .eq('id', req.user.id)
       .single();
     if (error || !data) throw new NotFoundError('Kullanıcı bulunamadı');
-    res.json({ user: data });
+    res.json({ user: toProfile(data as Record<string, unknown>) });
   } catch (err) {
     next(err);
   }
@@ -33,10 +40,42 @@ export const updateProfile: RequestHandler = async (req, res, next) => {
       .from('users')
       .update({ full_name: input.full_name })
       .eq('id', req.user.id)
-      .select('id, email, full_name, role, credits, created_at, updated_at')
+      .select('*')
       .single();
     if (error || !data) throw error ?? new NotFoundError();
-    res.json({ user: data });
+    res.json({ user: toProfile(data as Record<string, unknown>) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * KVKK md.10: records acceptance of the CURRENT privacy notice + terms. The
+ * client sends the versions it displayed; a mismatch (stale tab / web and server
+ * out of sync) is refused so we never record acceptance of a text not shown.
+ */
+export const acceptTerms: RequestHandler = async (req, res, next) => {
+  try {
+    if (!req.user) throw new AuthError();
+    const input = acceptTermsSchema.parse(req.body);
+    if (
+      input.terms_version !== LEGAL_VERSIONS.terms_version ||
+      input.privacy_notice_version !== LEGAL_VERSIONS.privacy_notice_version
+    ) {
+      throw new AppError(
+        409,
+        'LEGAL_VERSION_MISMATCH',
+        'Metinlerin güncel sürümü farklı. Sayfayı yenileyip tekrar deneyin.'
+      );
+    }
+    const { data, error } = await supabaseAdmin
+      .from('users')
+      .update({ ...LEGAL_VERSIONS, terms_accepted_at: new Date().toISOString() })
+      .eq('id', req.user.id)
+      .select('*')
+      .single();
+    if (error || !data) throw new AppError(500, 'ACCEPT_FAILED', 'Kabul kaydedilemedi');
+    res.json({ user: toProfile(data as Record<string, unknown>) });
   } catch (err) {
     next(err);
   }

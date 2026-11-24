@@ -1,12 +1,18 @@
 import type { RequestHandler } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
-import { AuthError } from '../utils/errors.js';
+import { AppError, AuthError } from '../utils/errors.js';
+import { LEGAL_EXEMPT_BASES, TERMS_REQUIRED_MESSAGE, legalAcceptanceState } from '../modules/legal/legal.js';
 import { runWithSubject } from '../utils/requestContext.js';
 import type { AuthUser } from '../modules/auth/auth.types.js';
 
 /**
  * Verifies a Supabase access token from the Authorization header
- * and attaches { id, email, role } to req.user.
+ * and attaches { id, email, role, legal } to req.user.
+ *
+ * KVKK md.10: a user who has not accepted the CURRENT privacy notice + terms
+ * gets 428 TERMS_ACCEPTANCE_REQUIRED on every router except LEGAL_EXEMPT_BASES
+ * (auth + account management: accept, export, delete). Secure by default — a new
+ * router is gated without extra wiring.
  */
 export const requireAuth: RequestHandler = async (req, _res, next) => {
   try {
@@ -22,10 +28,11 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
       throw new AuthError('Geçersiz veya süresi dolmuş oturum');
     }
 
-    // Load profile to determine role
+    // Load profile: role + KVKK acceptance columns. `*` (not a column list) so a
+    // DB without migration 023 still authenticates (legal state → 'unknown').
     const { data: profile, error: profileError } = await supabaseAdmin
       .from('users')
-      .select('role')
+      .select('*')
       .eq('id', data.user.id)
       .single();
 
@@ -37,8 +44,12 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
       id: data.user.id,
       email: data.user.email ?? '',
       role: profile.role as 'user' | 'admin',
+      legal: legalAcceptanceState(profile as Record<string, unknown>),
     };
     req.user = user;
+    if (user.legal === 'required' && !LEGAL_EXEMPT_BASES.has(req.baseUrl)) {
+      throw new AppError(428, 'TERMS_ACCEPTANCE_REQUIRED', TERMS_REQUIRED_MESSAGE);
+    }
     // Every brain call made while handling this request carries X-Subject-Id
     // (KVKK erasure by user) — see utils/requestContext.ts.
     runWithSubject(user.id, () => next());
