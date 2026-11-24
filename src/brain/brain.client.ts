@@ -40,6 +40,9 @@ import {
 } from './brain.types.js';
 import { z } from 'zod';
 
+/** Upper bound for POST /v2/privacy/erase (see eraseAuditTrail). */
+const ERASE_TIMEOUT_MS = 30_000;
+
 interface CircuitBreakerState {
   failures: number;
   openUntil: number; // epoch ms; 0 = closed
@@ -248,7 +251,9 @@ export class BrainClient {
    *   (yeni brain) → hepsi fırlatır; çağıran silme işlemini durdurur.
    */
   async eraseAuditTrail(req: { request_ids: string[]; user_id?: string }): Promise<BrainEraseResponse> {
-    const res = await this.doRequest('/v2/privacy/erase', req, BrainEraseResponseSchema);
+    // Short timeout: erase is a few indexed deletes. The 420 s answer timeout would
+    // keep an account deletion (or a retention batch) hanging on a stuck brain.
+    const res = await this.doRequest('/v2/privacy/erase', req, BrainEraseResponseSchema, ERASE_TIMEOUT_MS);
     if (!res.ok) throw new BrainErasureError(res.error ?? null);
     return res;
   }
@@ -402,13 +407,14 @@ export class BrainClient {
   private async doRequest<S extends z.ZodTypeAny>(
     path: string,
     body: unknown,
-    responseSchema: S
+    responseSchema: S,
+    timeoutMs: number = this.cfg.timeoutMs
   ): Promise<z.output<S>> {
     const url = `${this.cfg.baseUrl.replace(/\/$/, '')}${path}`;
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), this.cfg.timeoutMs);
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
     const started = Date.now();
-    logger.info('Brain request →', { url, timeoutMs: this.cfg.timeoutMs });
+    logger.info('Brain request →', { url, timeoutMs });
 
     let res;
     try {

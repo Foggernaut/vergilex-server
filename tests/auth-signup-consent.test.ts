@@ -51,7 +51,8 @@ beforeEach(() => {
 
 describe('POST /api/auth/signup', () => {
   it('requires the accepted legal versions', async () => {
-    const { terms_version: _t, ...noTerms } = BODY;
+    const noTerms: Partial<typeof BODY> = { ...BODY };
+    delete noTerms.terms_version;
     const res = await request(app).post('/api/auth/signup').set('X-Forwarded-For', fresh()).send(noTerms);
     expect(res.status).toBe(400);
     expect(mocks.signUp).not.toHaveBeenCalled();
