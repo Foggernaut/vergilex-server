@@ -9,6 +9,7 @@ import type * as AuthModule from '../src/middleware/auth.js';
 const mocks = vi.hoisted(() => ({
   eraseAuditTrail: vi.fn(),
   deleteUser: vi.fn(),
+  who: { id: 'u1' },
 }));
 
 vi.mock('../src/brain/brain.client.js', () => ({
@@ -26,7 +27,7 @@ vi.mock('../src/middleware/auth.js', async (orig) => {
   return {
     ...real,
     requireAuth: (req: express.Request, _res: express.Response, next: express.NextFunction) => {
-      (req as unknown as { user: unknown }).user = { id: 'u1', role: 'user', email: 'a@b.co' };
+      (req as unknown as { user: unknown }).user = { id: mocks.who.id, role: 'user', email: 'a@b.co' };
       next();
     },
   };
@@ -48,8 +49,18 @@ const R3 = '33333333-3333-4333-8333-333333333333';
 beforeEach(() => {
   vi.clearAllMocks();
   fake.reset();
+  mocks.who.id = 'u1';
   fake.seed('users', [
-    { id: 'u1', email: 'A@b.co', full_name: 'Ayşe', role: 'user', credits: 10 },
+    {
+      id: 'u1',
+      email: 'A@b.co',
+      full_name: 'Ayşe',
+      role: 'user',
+      credits: 10,
+      terms_version: '2026-11-23',
+      privacy_notice_version: '2026-11-23',
+      terms_accepted_at: '2026-11-23T10:00:00Z',
+    },
     { id: 'u2', email: 'x@y.z', full_name: 'Other', role: 'user', credits: 5 },
   ]);
   fake.seed('conversations', [
@@ -59,18 +70,37 @@ beforeEach(() => {
   ]);
   fake.seed('messages', [
     { id: 'm1', conversation_id: 'c1', role: 'user', content: 'soru', brain_request_id: null },
-    { id: 'm2', conversation_id: 'c1', role: 'assistant', content: 'cevap', brain_request_id: R1 },
+    {
+      id: 'm2',
+      conversation_id: 'c1',
+      role: 'assistant',
+      content: 'cevap',
+      brain_request_id: R1,
+      sources: [{ chunk_id: 'KDVK-17-C0', content: 'KORPUS-METNI' }],
+      conflicts: [{ detail: 'KORPUS-CELISKI' }],
+    },
     { id: 'm3', conversation_id: 'c2', role: 'assistant', content: 'eski', brain_request_id: R2 },
     { id: 'm9', conversation_id: 'c9', role: 'assistant', content: 'başkası', brain_request_id: 'zzz' },
   ]);
   fake.seed('assistant_conversations', [{ id: 'a1', user_id: 'u1', title: 'as' }]);
   fake.seed('assistant_messages', [
-    { id: 'am1', conversation_id: 'a1', role: 'assistant', content: 'deneme', brain_request_id: R3 },
+    {
+      id: 'am1',
+      conversation_id: 'a1',
+      role: 'assistant',
+      content: 'deneme',
+      brain_request_id: R3,
+      corpus_summaries: [{ corpus: 'kanun', summary: 'KORPUS-OZET' }],
+    },
   ]);
   fake.seed('credit_transactions', [{ id: 't1', user_id: 'u1', amount: -5 }]);
-  fake.seed('favorites', [{ id: 'f1', user_id: 'u1', chunk_id: 'k', notes: 'not' }]);
+  fake.seed('favorites', [
+    { id: 'f1', user_id: 'u1', chunk_id: 'k', notes: 'not', cached_data: { content: 'KORPUS-FAVORI' } },
+  ]);
   fake.seed('search_history', [{ id: 'h1', user_id: 'u1', query: 'q' }]);
-  fake.seed('search_results', [{ id: 's1', user_id: 'u1', request: {}, response: {} }]);
+  fake.seed('search_results', [
+    { id: 's1', user_id: 'u1', request: { query: 'q' }, response: { results: ['KORPUS-SONUC'] } },
+  ]);
   mocks.eraseAuditTrail.mockResolvedValue({ ok: true, requests_deleted: 3, feedback_deleted: 0 });
   mocks.deleteUser.mockResolvedValue({ data: {}, error: null });
 });
@@ -92,6 +122,35 @@ describe('GET /api/user/me/export', () => {
     expect(JSON.stringify(b)).not.toContain('başkası');
     expect(JSON.stringify(b)).not.toContain('Other');
   });
+
+  it('includes the consent record and message text, leaves out bulky corpus payloads (stated in notes)', async () => {
+    const res = await request(app).get('/api/user/me/export');
+    const b = res.body;
+    expect(b.profile).toMatchObject({
+      terms_version: '2026-11-23',
+      privacy_notice_version: '2026-11-23',
+      terms_accepted_at: '2026-11-23T10:00:00Z',
+    });
+    const m2 = b.conversations.find((c: { id: string }) => c.id === 'c1').messages[1];
+    expect(m2).toMatchObject({ role: 'assistant', content: 'cevap', brain_request_id: R1 });
+    expect(b.search_results[0].request).toEqual({ query: 'q' });
+    expect(JSON.stringify(b)).not.toMatch(/KORPUS-/);
+    expect(Array.isArray(b.notes) && b.notes.join(' ')).toMatch(/kişisel veri değildir/);
+    // explicit column lists only — never select('*')
+    expect(fake.calls.filter((c) => c.op === 'select').map((c) => c.columns)).not.toContain('*');
+  });
+
+  it('is rate-limited per user (5/hour)', async () => {
+    mocks.who.id = 'u-limit';
+    fake.seed('users', [{ id: 'u-limit', email: 'l@b.co', role: 'user', credits: 0 }]);
+    for (let i = 0; i < 5; i++) {
+      expect((await request(app).get('/api/user/me/export')).status).toBe(200);
+    }
+    const sixth = await request(app).get('/api/user/me/export');
+    expect(sixth.status).toBe(429);
+    mocks.who.id = 'u1';
+    expect((await request(app).get('/api/user/me/export')).status).toBe(200);
+  });
 });
 
 describe('DELETE /api/user/me', () => {
@@ -112,6 +171,10 @@ describe('DELETE /api/user/me', () => {
     expect(mocks.eraseAuditTrail.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.deleteUser.mock.invocationCallOrder[0]
     );
+    // request-id collection reads only the id columns, not whole message rows
+    const msgSelects = fake.calls.filter((c) => /messages$/.test(c.table) && c.op === 'select');
+    expect(msgSelects.length).toBeGreaterThan(0);
+    for (const c of msgSelects) expect(c.columns).toBe('brain_request_id');
   });
 
   it('does NOT delete the account when audit erasure fails (no half-deletion)', async () => {

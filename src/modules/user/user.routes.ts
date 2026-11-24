@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireAdmin, requireAuth } from '../../middleware/auth.js';
+import { exportLimiter } from '../../middleware/rateLimit.js';
 import {
   deleteMyAccount,
   exportMyData,
@@ -19,5 +20,5 @@ userRouter.get('/credits', getCredits);
 userRouter.get('/history', getHistory);
 userRouter.get('/claude-budget', requireAdmin, getClaudeBudget);
 // KVKK md.11: erişim/taşınabilirlik + silme hakkı
-userRouter.get('/me/export', exportMyData);
+userRouter.get('/me/export', exportLimiter, exportMyData);
 userRouter.delete('/me', deleteMyAccount);

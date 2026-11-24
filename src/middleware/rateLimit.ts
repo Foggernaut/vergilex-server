@@ -37,3 +37,16 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: { code: 'RATE_LIMITED', message: 'Çok fazla deneme, lütfen 15 dakika sonra tekrar deneyin' } },
 });
+
+// KVKK veri dışa aktarma (GET /api/user/me/export) — her çağrı kullanıcının bütün
+// verisini okur: kullanıcı başına saatte 5. Mounted after requireAuth, so the key
+// is the user id; the IP fallback is never hit in practice. (express-rate-limit 7.x
+// has no IPv6 keyGenerator validation — on a v8 upgrade wrap it in ipKeyGenerator.)
+export const exportLimiter = rateLimit({
+  windowMs: 60 * 60_000,
+  limit: 5,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id ?? req.ip ?? 'anon',
+  message: { error: { code: 'RATE_LIMITED', message: 'Veri dışa aktarma limiti aşıldı, lütfen bir saat sonra tekrar deneyin' } },
+});
