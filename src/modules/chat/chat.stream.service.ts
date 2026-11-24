@@ -8,8 +8,8 @@ import type {
   BrainHistoryItem,
 } from '../../brain/brain.types.js';
 import { DEFAULT_ANSWER_LENGTH, v2ChatCost } from '../../utils/creditCosts.js';
-import { getBalance } from '../credits/credits.service.js';
-import { InsufficientCreditsError, NotFoundError } from '../../utils/errors.js';
+import { assertCanAfford as assertBalance } from '../credits/credits.service.js';
+import { NotFoundError } from '../../utils/errors.js';
 import { logger } from '../../config/logger.js';
 import type { SseWriter } from '../../utils/sse.js';
 import {
@@ -120,11 +120,8 @@ export async function streamFollowUp(
 
 // ── internals ──────────────────────────────────────────────────────────────
 
-async function assertCanAfford(userId: string): Promise<void> {
-  const cost = v2ChatCost();
-  if (cost <= 0) return;
-  const balance = await getBalance(userId);
-  if (balance < cost) throw new InsufficientCreditsError();
+function assertCanAfford(userId: string): Promise<void> {
+  return assertBalance(userId, v2ChatCost());
 }
 
 /**

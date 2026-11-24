@@ -14,10 +14,10 @@ vi.mock('../src/modules/assistant/assistant.stream.service.js', async (orig) => 
   const real = await orig<Record<string, unknown>>();
   return { ...real, streamAssistantChat: stream.streamAssistantChat };
 });
-vi.mock('../src/config/supabase.js', () => ({
-  supabaseAdmin: { auth: { getUser } },
-  supabaseAnon: {},
-}));
+vi.mock('../src/config/supabase.js', async () => {
+  const { fakeSupabase } = await import('./helpers/fakeSupabase.js');
+  return { supabaseAdmin: Object.assign(fakeSupabase, { auth: { getUser } }), supabaseAnon: {} };
+});
 vi.mock('../src/middleware/auth.js', async (orig) => {
   const real = await orig<typeof AuthModule>();
   return {
@@ -32,6 +32,7 @@ vi.mock('../src/middleware/auth.js', async (orig) => {
 import { assistantRouter } from '../src/modules/assistant/assistant.routes.js';
 import { errorHandler } from '../src/middleware/errorHandler.js';
 import { _resetStreamTicketsForTest } from '../src/modules/assistant/streamTicket.js';
+import { fakeSupabase as fake } from './helpers/fakeSupabase.js';
 
 const app = express();
 app.use(express.json());
@@ -43,6 +44,8 @@ const QUERY = 'Kat karşılığı inşaatta KDV doğar mı? Müşterim TCKN 1234
 beforeEach(() => {
   vi.clearAllMocks();
   _resetStreamTicketsForTest();
+  fake.reset();
+  fake.seed('users', [{ id: 'u1', role: 'user', credits: 100 }]);
   stream.streamAssistantChat.mockImplementation(async (_input, sse: { res?: express.Response }) => {
     const res = (sse as unknown as { res: express.Response }).res;
     res.end();

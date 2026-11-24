@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { AuthError } from '../../utils/errors.js';
 import { SseWriter } from '../../utils/sse.js';
 import { runWithSubject } from '../../utils/requestContext.js';
+import { DEFAULT_ANSWER_LENGTH, assistantChatCost } from '../../utils/creditCosts.js';
+import { assertCanAfford } from '../credits/credits.service.js';
 import { newAssistantChatSchema, assistantFollowUpSchema } from './assistant.schema.js';
 import { consumeStreamTicket, issueStreamTicket, STREAM_TICKET_TTL_MS } from './streamTicket.js';
 import {
@@ -91,6 +93,10 @@ export const createAssistantStreamTicket: RequestHandler = async (req, res, next
   try {
     if (!req.user) throw new AuthError();
     const input = newAssistantChatSchema.parse(req.body);
+    // Balance pre-check HERE, while the client can still read a JSON 402: the
+    // EventSource GET's 402 is invisible to the browser, which would then fall
+    // back to the buffered POST (expensive pipeline before billing fails).
+    await assertCanAfford(req.user.id, assistantChatCost(input.answer_length ?? DEFAULT_ANSWER_LENGTH));
     const ticket = issueStreamTicket({
       userId: req.user.id,
       query: input.query,

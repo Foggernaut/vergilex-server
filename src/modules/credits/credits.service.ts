@@ -73,6 +73,16 @@ export async function getBalance(userId: string): Promise<number> {
   return data.credits;
 }
 
+/**
+ * Balance pre-check before an expensive brain call (billing itself stays atomic
+ * in deduct_credits on completion). Throws InsufficientCreditsError (402).
+ */
+export async function assertCanAfford(userId: string, cost: number): Promise<void> {
+  if (cost <= 0) return;
+  const balance = await getBalance(userId);
+  if (balance < cost) throw new InsufficientCreditsError();
+}
+
 export async function listTransactions(userId: string, limit = 20) {
   const { data, error } = await supabaseAdmin
     .from('credit_transactions')
