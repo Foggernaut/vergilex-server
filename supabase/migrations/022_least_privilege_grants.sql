@@ -22,24 +22,40 @@
 BEGIN;
 
 -- ── 1. RPCs: server-only ────────────────────────────────────────────────────
-REVOKE ALL ON FUNCTION public.deduct_credits(UUID, INTEGER, TEXT, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public.grant_credits(UUID, INTEGER, TEXT, TEXT, JSONB)  FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.deduct_credits(UUID, INTEGER, TEXT, TEXT, JSONB) TO service_role;
-GRANT EXECUTE ON FUNCTION public.grant_credits(UUID, INTEGER, TEXT, TEXT, JSONB)  TO service_role;
+-- Resolved by NAME from pg_proc, not a hard-coded signature: the live functions'
+-- parameter ORDER differs from 006_deduct_credits_function.sql (schema drift —
+-- PostgREST binds by name, so the app never noticed). This also covers overloads.
+DO $$
+DECLARE f regprocedure;
+BEGIN
+  FOR f IN
+    SELECT p.oid::regprocedure
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND p.proname IN ('deduct_credits', 'grant_credits', 'handle_new_user', 'set_updated_at')
+  LOOP
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated', f);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role', f);
+    -- SECURITY DEFINER functions must pin search_path (object-shadowing hardening).
+    EXECUTE format('ALTER FUNCTION %s SET search_path = public, pg_temp', f);
+    RAISE NOTICE 'locked down %', f;
+  END LOOP;
 
--- SECURITY DEFINER functions must pin search_path (object-shadowing hardening).
-ALTER FUNCTION public.deduct_credits(UUID, INTEGER, TEXT, TEXT, JSONB) SET search_path = public, pg_temp;
-ALTER FUNCTION public.grant_credits(UUID, INTEGER, TEXT, TEXT, JSONB)  SET search_path = public, pg_temp;
-ALTER FUNCTION public.handle_new_user() SET search_path = public, pg_temp;
-ALTER FUNCTION public.set_updated_at()  SET search_path = public, pg_temp;
+  -- Belt-and-braces for the signup trigger: Postgres checks trigger-function
+  -- EXECUTE at CREATE TRIGGER time, not at fire time, but an explicit grant to
+  -- the role that inserts into auth.users guarantees signups never break here.
+  FOR f IN
+    SELECT p.oid::regprocedure
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public' AND p.proname = 'handle_new_user'
+  LOOP
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO supabase_auth_admin', f);
+  END LOOP;
+END $$;
 
 -- Catch-all for any function created out-of-band in the dashboard.
 REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO service_role;
--- Belt-and-braces for the signup trigger: Postgres checks trigger-function EXECUTE
--- at CREATE TRIGGER time, not at fire time, but an explicit grant to the role that
--- inserts into auth.users guarantees signups can never break on this migration.
-GRANT  EXECUTE ON FUNCTION public.handle_new_user() TO supabase_auth_admin;
 
 -- ── 2. Tables: no client writes; anon reads nothing ─────────────────────────
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
@@ -76,9 +92,14 @@ DROP POLICY IF EXISTS fav_delete_own ON public.favorites;
 
 COMMIT;
 
--- ── Verification (run after COMMIT; every row must be false) ─────────────────
--- SELECT 'anon exec grant_credits'  AS chk, has_function_privilege('anon','public.grant_credits(uuid,integer,text,text,jsonb)','EXECUTE') AS v
--- UNION ALL SELECT 'auth exec deduct_credits', has_function_privilege('authenticated','public.deduct_credits(uuid,integer,text,text,jsonb)','EXECUTE')
--- UNION ALL SELECT 'auth update users.role',  has_column_privilege('authenticated','public.users','role','UPDATE')
+-- ── Verification (run after COMMIT; every `v` must be false) ─────────────────
+-- SELECT 'anon exec '||p.oid::regprocedure AS chk, has_function_privilege('anon', p.oid, 'EXECUTE') AS v
+--   FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+--  WHERE n.nspname='public' AND p.proname IN ('grant_credits','deduct_credits')
+-- UNION ALL
+-- SELECT 'auth exec '||p.oid::regprocedure, has_function_privilege('authenticated', p.oid, 'EXECUTE')
+--   FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+--  WHERE n.nspname='public' AND p.proname IN ('grant_credits','deduct_credits')
+-- UNION ALL SELECT 'auth update users.role',    has_column_privilege('authenticated','public.users','role','UPDATE')
 -- UNION ALL SELECT 'auth update users.credits', has_column_privilege('authenticated','public.users','credits','UPDATE')
--- UNION ALL SELECT 'anon select messages',     has_table_privilege('anon','public.messages','SELECT');
+-- UNION ALL SELECT 'anon select messages',      has_table_privilege('anon','public.messages','SELECT');
