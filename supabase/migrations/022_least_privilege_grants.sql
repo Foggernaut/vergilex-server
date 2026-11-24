@@ -21,10 +21,20 @@
 
 BEGIN;
 
+-- ── 0. Guard: PRODUCT project only (qjjbfkifxtpzcapitlvo) ──────────────────
+-- Stops BEFORE any change if run in the corpus or audit project by mistake.
+DO $$
+BEGIN
+  IF to_regclass('public.users') IS NULL
+     OR to_regclass('public.conversations') IS NULL
+     OR to_regclass('public.credit_transactions') IS NULL THEN
+    RAISE EXCEPTION 'Wrong Supabase project: run 022 in the PRODUCT project (ref qjjbfkifxtpzcapitlvo), not corpus/audit. Nothing was changed.';
+  END IF;
+END $$;
+
 -- ── 1. RPCs: server-only ────────────────────────────────────────────────────
--- Resolved by NAME from pg_proc, not a hard-coded signature: the live functions'
--- parameter ORDER differs from 006_deduct_credits_function.sql (schema drift —
--- PostgREST binds by name, so the app never noticed). This also covers overloads.
+-- Resolved by NAME from pg_proc, not a hard-coded signature, so any parameter
+-- order / overload present in the live DB is covered.
 DO $$
 DECLARE f regprocedure;
 BEGIN
