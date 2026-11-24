@@ -2,8 +2,10 @@ import { FormData, request } from 'undici';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { sseFrames } from '../utils/sse.js';
+import { currentSubjectId } from '../utils/requestContext.js';
 import {
   BrainAuthError,
+  BrainErasureError,
   BrainError,
   BrainNotFoundError,
   BrainSchemaError,
@@ -138,11 +140,10 @@ export class BrainClient {
     try {
       res = await request(url, {
         method: 'POST',
-        headers: {
+        headers: this.headers({
           'content-type': 'application/json',
           accept: 'text/event-stream',
-          'x-api-key': this.cfg.apiKey,
-        },
+        }),
         body: JSON.stringify(req),
         signal,
       });
@@ -235,9 +236,21 @@ export class BrainClient {
     return this.post('/v2/feedback', req, BrainFeedbackResponseSchema);
   }
 
-  /** KVKK md.11: hesap silmeden ÖNCE kullanıcının audit izini sildir (503 → hata). */
-  async eraseAuditTrail(req: { request_ids: string[]; user_id: string }): Promise<BrainEraseResponse> {
-    return this.post('/v2/privacy/erase', req, BrainEraseResponseSchema);
+  /**
+   * KVKK: audit izini sildir (hesap silme ÖNCESİ, saklama süresi dolan sohbetler).
+   *
+   * - `user_id` verilirse brain o kullanıcının TÜM audit satırlarını siler (yalnız
+   *   hesap silmede). Verilmezse yalnız `request_ids` silinir (saklama işi).
+   * - Circuit breaker'ı TAMAMEN atlar (ne kontrol ne sayım): audit-DB'deki bir
+   *   aksaklıkta art arda başarısız hesap silmeleri, cevap trafiğinin tamamını
+   *   kesen breaker'ı açmamalı.
+   * - Başarısızlık = ağ hatası, 2xx dışı (eski brain 503 döner) VEYA 200 + `ok:false`
+   *   (yeni brain) → hepsi fırlatır; çağıran silme işlemini durdurur.
+   */
+  async eraseAuditTrail(req: { request_ids: string[]; user_id?: string }): Promise<BrainEraseResponse> {
+    const res = await this.doRequest('/v2/privacy/erase', req, BrainEraseResponseSchema);
+    if (!res.ok) throw new BrainErasureError(res.error ?? null);
+    return res;
   }
 
   async analyzeDocument(input: {
@@ -345,7 +358,7 @@ export class BrainClient {
     try {
       res = await request(url, {
         method: 'GET',
-        headers: { 'x-api-key': this.cfg.apiKey },
+        headers: this.headers(),
         signal: ctrl.signal,
       });
     } catch (err: unknown) {
@@ -401,10 +414,7 @@ export class BrainClient {
     try {
       res = await request(url, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': this.cfg.apiKey,
-        },
+        headers: this.headers({ 'content-type': 'application/json' }),
         body: JSON.stringify(body),
         signal: ctrl.signal,
       });
@@ -492,7 +502,7 @@ export class BrainClient {
 
       res = await request(url, {
         method: 'POST',
-        headers: { 'x-api-key': this.cfg.apiKey },
+        headers: this.headers(),
         body: form,
         signal: ctrl.signal,
       });
@@ -557,6 +567,19 @@ export class BrainClient {
     }
     this.recordSuccess();
     return parsed.data;
+  }
+
+  /**
+   * Shared outbound headers. `X-Subject-Id` = the logged-in user on whose behalf
+   * the call is made (request context, see utils/requestContext.ts); the brain
+   * stores an HMAC of it on every audit row so KVKK erasure can find all of a
+   * user's rows. Absent outside a request (jobs).
+   */
+  private headers(extra: Record<string, string> = {}): Record<string, string> {
+    const h: Record<string, string> = { ...extra, 'x-api-key': this.cfg.apiKey };
+    const subject = currentSubjectId();
+    if (subject) h['x-subject-id'] = subject;
+    return h;
   }
 
   private isRetriable(err: BrainError): boolean {

@@ -1,6 +1,7 @@
 import type { RequestHandler } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { AuthError } from '../utils/errors.js';
+import { runWithSubject } from '../utils/requestContext.js';
 import type { AuthUser } from '../modules/auth/auth.types.js';
 
 /**
@@ -38,7 +39,9 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
       role: profile.role as 'user' | 'admin',
     };
     req.user = user;
-    next();
+    // Every brain call made while handling this request carries X-Subject-Id
+    // (KVKK erasure by user) — see utils/requestContext.ts.
+    runWithSubject(user.id, () => next());
   } catch (err) {
     next(err);
   }

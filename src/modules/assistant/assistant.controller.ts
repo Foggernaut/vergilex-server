@@ -2,6 +2,7 @@ import type { RequestHandler } from 'express';
 import { z } from 'zod';
 import { AuthError } from '../../utils/errors.js';
 import { SseWriter } from '../../utils/sse.js';
+import { runWithSubject } from '../../utils/requestContext.js';
 import { newAssistantChatSchema, assistantFollowUpSchema } from './assistant.schema.js';
 import { consumeStreamTicket, issueStreamTicket, STREAM_TICKET_TTL_MS } from './streamTicket.js';
 import {
@@ -115,7 +116,9 @@ export const createAssistantChatStreamGET: RequestHandler = async (req, res, nex
     const ac = new AbortController();
     res.on('close', () => ac.abort());
     const sse = new SseWriter(res);
-    await streamAssistantChat(payload, sse, ac.signal);
+    // This route runs before requireAuth (ticket auth), so establish the
+    // request's data subject here for the brain's X-Subject-Id header.
+    await runWithSubject(payload.userId, () => streamAssistantChat(payload, sse, ac.signal));
   } catch (err) {
     if (!res.headersSent) return next(err);
     if (!res.writableEnded) res.end();
