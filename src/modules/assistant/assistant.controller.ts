@@ -2,8 +2,11 @@ import type { RequestHandler } from 'express';
 import { z } from 'zod';
 import { AuthError } from '../../utils/errors.js';
 import { SseWriter } from '../../utils/sse.js';
-import { supabaseAdmin } from '../../config/supabase.js';
+import { runWithSubject } from '../../utils/requestContext.js';
+import { DEFAULT_ANSWER_LENGTH, assistantChatCost } from '../../utils/creditCosts.js';
+import { assertCanAfford } from '../credits/credits.service.js';
 import { newAssistantChatSchema, assistantFollowUpSchema } from './assistant.schema.js';
+import { consumeStreamTicket, issueStreamTicket, STREAM_TICKET_TTL_MS } from './streamTicket.js';
 import {
   deleteAssistantConversation,
   followUpAssistant,
@@ -15,7 +18,6 @@ import {
   streamAssistantChat,
   streamAssistantFollowUp,
 } from './assistant.stream.service.js';
-import { MAX_QUERY_CHARS, MIN_QUERY_CHARS } from '../../utils/queryLimits.js';
 
 // ── Buffered ────────────────────────────────────────────────────────────────
 
@@ -81,41 +83,48 @@ export const createAssistantChatStream: RequestHandler = async (req, res, next) 
 
 // EventSource variant of createAssistantChatStream. Browsers buffer fetch()
 // ReadableStreams in some environments, delivering the whole SSE body only at
-// the end; EventSource uses the native SSE engine and never buffers. Since
-// EventSource cannot set an Authorization header, the token + params come via
-// the query string (token is a short-lived Supabase JWT; requestLog logs req.path
-// only, so it is not written to our logs).
+// the end; EventSource uses the native SSE engine and never buffers.
+//
+// EventSource cannot set an Authorization header or send a body, so the client
+// first POSTs /conversations/stream-ticket (Bearer + JSON body) and opens the
+// EventSource with only an opaque single-use `?ticket=`. The JWT and the user's
+// question never appear in a URL (edge/proxy access logs record full URLs).
+export const createAssistantStreamTicket: RequestHandler = async (req, res, next) => {
+  try {
+    if (!req.user) throw new AuthError();
+    const input = newAssistantChatSchema.parse(req.body);
+    // Balance pre-check HERE, while the client can still read a JSON 402: the
+    // EventSource GET's 402 is invisible to the browser, which would then fall
+    // back to the buffered POST (expensive pipeline before billing fails).
+    await assertCanAfford(req.user.id, assistantChatCost(input.answer_length ?? DEFAULT_ANSWER_LENGTH));
+    const ticket = issueStreamTicket({
+      userId: req.user.id,
+      query: input.query,
+      filters: input.filters,
+      answer_length: input.answer_length,
+    });
+    res.status(201).json({ ticket, expires_in: STREAM_TICKET_TTL_MS / 1000 });
+  } catch (err) {
+    next(err);
+  }
+};
+
 const assistantStreamQuerySchema = z.object({
-  access_token: z.string().min(10),
-  query: z.string().min(MIN_QUERY_CHARS).max(MAX_QUERY_CHARS),
-  answer_length: z.enum(['short', 'medium', 'long']).optional(),
-  // comma-separated corpus keys
-  corpora: z.string().optional(),
+  ticket: z.string().min(20).max(200),
 });
 
 export const createAssistantChatStreamGET: RequestHandler = async (req, res, next) => {
   try {
     const q = assistantStreamQuerySchema.parse(req.query);
-    const { data, error } = await supabaseAdmin.auth.getUser(q.access_token);
-    if (error || !data.user) throw new AuthError('Geçersiz veya süresi dolmuş oturum');
-
-    const corpora = q.corpora
-      ? q.corpora.split(',').map((s) => s.trim()).filter(Boolean)
-      : undefined;
+    const payload = consumeStreamTicket(q.ticket);
+    if (!payload) throw new AuthError('Geçersiz veya süresi dolmuş akış bileti');
 
     const ac = new AbortController();
     res.on('close', () => ac.abort());
     const sse = new SseWriter(res);
-    await streamAssistantChat(
-      {
-        userId: data.user.id,
-        query: q.query,
-        filters: corpora?.length ? { corpora } : undefined,
-        answer_length: q.answer_length,
-      },
-      sse,
-      ac.signal
-    );
+    // This route runs before requireAuth (ticket auth), so establish the
+    // request's data subject here for the brain's X-Subject-Id header.
+    await runWithSubject(payload.userId, () => streamAssistantChat(payload, sse, ac.signal));
   } catch (err) {
     if (!res.headersSent) return next(err);
     if (!res.writableEnded) res.end();

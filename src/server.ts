@@ -3,6 +3,7 @@ import { Agent, setGlobalDispatcher } from 'undici';
 import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
+import { scheduleRetention } from './jobs/retention.js';
 
 // ── Outbound (undici) timeout headroom for the slow brain ────────────────────
 // The brain buffers whole answers (no response headers until done) up to ~275s
@@ -21,14 +22,16 @@ setGlobalDispatcher(
 );
 
 const app = createApp();
+scheduleRetention();
 
-// ── Inbound header budget for long questions ─────────────────────────────────
-// The assistant stream is an EventSource GET: the question rides in the query
-// string (EventSource can't send a body). Soru tavanı 4000 karakter; Türkçe
-// karakterler URL'de 6 bayta kodlanır → istek satırı 10–24 KB olabilir. Node'un
-// varsayılan 16 KB başlık sınırı bunu 431 ile reddederdi (fallback POST da uzun
-// 3 Aşamalı cevaplarda istemci zaman aşımına düşer). 64 KB = 4000 karakter + JWT
-// + çerezler için bol pay.
+// ── Inbound header budget ────────────────────────────────────────────────────
+// Historically the assistant EventSource carried the 4000-char question + JWT in
+// the query string (10–24 KB request line). Since the stream-ticket change
+// (SECURITY P0, 2026-11-23) the URL carries only `?ticket=`. There is NO
+// backward compatibility for older clients: the legacy `?access_token=&query=`
+// stream form is refused (400) and signup requires the terms/privacy version
+// fields — deploy web and server together. 64 KB is merely leftover headroom
+// and can be lowered once nothing else needs it.
 const MAX_HEADER_BYTES = 64 * 1024;
 
 const server = createServer({ maxHeaderSize: MAX_HEADER_BYTES }, app).listen(env.PORT, () => {

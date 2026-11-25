@@ -5,6 +5,7 @@ import {
   createAssistantChat,
   createAssistantChatStream,
   createAssistantChatStreamGET,
+  createAssistantStreamTicket,
   deleteAssistant,
   followUpAssistantChat,
   followUpAssistantChatStream,
@@ -15,12 +16,15 @@ import {
 export const assistantRouter = Router();
 
 // EventSource SSE endpoint — MUST be before requireAuth (EventSource can't send
-// the Authorization header; it authenticates via ?access_token in the handler).
+// the Authorization header). It authenticates with a single-use ?ticket= issued
+// by POST /conversations/stream-ticket below (never the JWT in the URL).
 assistantRouter.get('/conversations/stream', createAssistantChatStreamGET);
 
 assistantRouter.use(requireAuth);
 
 // Mevzuat Asistanı (Opus 4.8 agentic, paid). Dedicated assistant_* tables.
+// Ticket issuance is the rate-limited entry point of the EventSource flow.
+assistantRouter.post('/conversations/stream-ticket', aiLimiter, createAssistantStreamTicket);
 assistantRouter.post('/conversations', aiLimiter, createAssistantChat);
 assistantRouter.post('/conversations/stream', aiLimiter, createAssistantChatStream);
 assistantRouter.post('/conversations/:id/follow-up', aiLimiter, followUpAssistantChat);

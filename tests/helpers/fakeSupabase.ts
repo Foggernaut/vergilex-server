@@ -1,19 +1,19 @@
 // Tabloya duyarlı, zincirlenebilir, thenable sahte supabase-js (yalnız bu testlerin kullandığı yüzey).
-// `from(table)` → select / insert / delete + .eq .in .gte .lt .order .range .abortSignal .single .maybeSingle.
+// `from(table)` → select / insert / delete + .eq .is .in .gt .gte .lt .order .range .limit .abortSignal .single .maybeSingle.
 // Satırlar bellekte tutulur (gerçek süzme/silme davranışı sınanır); her çağrı `calls`'a düşer: tablo,
 // işlem, select argümanı, insert payload'ı, süzgeçler, abortSignal.
 
 export type Row = Record<string, unknown>;
 
 export interface FakeFilter {
-  op: 'eq' | 'in' | 'gte' | 'lt';
+  op: 'eq' | 'is' | 'in' | 'gt' | 'gte' | 'lt';
   column: string;
   value: unknown;
 }
 
 export interface FakeCall {
   table: string;
-  op: 'select' | 'insert' | 'delete';
+  op: 'select' | 'insert' | 'update' | 'delete';
   /** select(...) argümanı; insert(...).select(...) için döndürülen sütunlar. */
   columns: string | null;
   payload: unknown;
@@ -46,8 +46,13 @@ function matches(row: Row, f: FakeFilter): boolean {
   switch (f.op) {
     case 'eq':
       return v === f.value;
+    case 'is':
+      // .is(col, null): a seeded row without the column counts as NULL.
+      return f.value === null ? v == null : v === f.value;
     case 'in':
       return Array.isArray(f.value) && f.value.includes(v);
+    case 'gt':
+      return v != null && compare(v, f.value) > 0;
     case 'gte':
       return v != null && compare(v, f.value) >= 0;
     case 'lt':
@@ -66,6 +71,7 @@ class Builder implements PromiseLike<FakeResult> {
   private readonly call: FakeCall;
   private orderBy: { column: string; ascending: boolean } | null = null;
   private rangeFrom: [number, number] | null = null;
+  private limitTo: number | null = null;
 
   constructor(
     private readonly fake: FakeSupabase,
@@ -91,6 +97,11 @@ class Builder implements PromiseLike<FakeResult> {
     this.call.payload = payload;
     return this;
   }
+  update(payload: unknown) {
+    this.call.op = 'update';
+    this.call.payload = payload;
+    return this;
+  }
   delete() {
     this.call.op = 'delete';
     return this;
@@ -99,8 +110,16 @@ class Builder implements PromiseLike<FakeResult> {
     this.call.filters.push({ op: 'eq', column, value });
     return this;
   }
+  is(column: string, value: unknown) {
+    this.call.filters.push({ op: 'is', column, value });
+    return this;
+  }
   in(column: string, value: unknown[]) {
     this.call.filters.push({ op: 'in', column, value });
+    return this;
+  }
+  gt(column: string, value: unknown) {
+    this.call.filters.push({ op: 'gt', column, value });
     return this;
   }
   gte(column: string, value: unknown) {
@@ -117,6 +136,10 @@ class Builder implements PromiseLike<FakeResult> {
   }
   range(from: number, to: number) {
     this.rangeFrom = [from, to];
+    return this;
+  }
+  limit(n: number) {
+    this.limitTo = n;
     return this;
   }
   abortSignal(signal: AbortSignal) {
@@ -165,12 +188,25 @@ class Builder implements PromiseLike<FakeResult> {
       return this.shape(call.columns ? [project(row, call.columns)] : []);
     }
 
+    if (call.op === 'update') {
+      const changed: Row[] = [];
+      for (const r of rows) {
+        if (hit(r)) {
+          Object.assign(r, (call.payload ?? {}) as Row);
+          changed.push(r);
+        }
+      }
+      return this.shape(call.columns ? changed.map((r) => project(r, call.columns)) : []);
+    }
+
     if (call.op === 'delete') {
+      const removed = rows.filter(hit);
       this.fake.tables.set(
         call.table,
         rows.filter((r) => !hit(r))
       );
-      return { data: null, error: null };
+      // delete().select(cols) → returns the removed rows (PostgREST `return=representation`).
+      return call.columns ? this.shape(removed.map((r) => project(r, call.columns))) : { data: null, error: null };
     }
 
     let found = rows.filter(hit);
@@ -179,6 +215,7 @@ class Builder implements PromiseLike<FakeResult> {
       found = [...found].sort((a, b) => (ascending ? 1 : -1) * compare(a[column], b[column]));
     }
     if (this.rangeFrom) found = found.slice(this.rangeFrom[0], this.rangeFrom[1] + 1);
+    if (this.limitTo !== null) found = found.slice(0, this.limitTo);
     return this.shape(found.map((r) => project(r, call.columns)));
   }
 

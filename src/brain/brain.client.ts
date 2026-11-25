@@ -2,8 +2,10 @@ import { FormData, request } from 'undici';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { sseFrames } from '../utils/sse.js';
+import { currentSubjectId } from '../utils/requestContext.js';
 import {
   BrainAuthError,
+  BrainErasureError,
   BrainError,
   BrainNotFoundError,
   BrainSchemaError,
@@ -21,6 +23,8 @@ import {
   type BrainFeedbackRequest,
   type BrainFeedbackResponse,
   BrainFeedbackResponseSchema,
+  type BrainEraseResponse,
+  BrainEraseResponseSchema,
   type BrainFindDocumentsRequest,
   type BrainFindDocumentsResponse,
   BrainFindDocumentsResponseSchema,
@@ -35,6 +39,9 @@ import {
   type BrainStreamEvent,
 } from './brain.types.js';
 import { z } from 'zod';
+
+/** Upper bound for POST /v2/privacy/erase (see eraseAuditTrail). */
+const ERASE_TIMEOUT_MS = 30_000;
 
 interface CircuitBreakerState {
   failures: number;
@@ -136,11 +143,10 @@ export class BrainClient {
     try {
       res = await request(url, {
         method: 'POST',
-        headers: {
+        headers: this.headers({
           'content-type': 'application/json',
           accept: 'text/event-stream',
-          'x-api-key': this.cfg.apiKey,
-        },
+        }),
         body: JSON.stringify(req),
         signal,
       });
@@ -231,6 +237,25 @@ export class BrainClient {
 
   async submitFeedback(req: BrainFeedbackRequest): Promise<BrainFeedbackResponse> {
     return this.post('/v2/feedback', req, BrainFeedbackResponseSchema);
+  }
+
+  /**
+   * KVKK: audit izini sildir (hesap silme ÖNCESİ, saklama süresi dolan sohbetler).
+   *
+   * - `user_id` verilirse brain o kullanıcının TÜM audit satırlarını siler (yalnız
+   *   hesap silmede). Verilmezse yalnız `request_ids` silinir (saklama işi).
+   * - Circuit breaker'ı TAMAMEN atlar (ne kontrol ne sayım): audit-DB'deki bir
+   *   aksaklıkta art arda başarısız hesap silmeleri, cevap trafiğinin tamamını
+   *   kesen breaker'ı açmamalı.
+   * - Başarısızlık = ağ hatası, 2xx dışı (eski brain 503 döner) VEYA 200 + `ok:false`
+   *   (yeni brain) → hepsi fırlatır; çağıran silme işlemini durdurur.
+   */
+  async eraseAuditTrail(req: { request_ids: string[]; user_id?: string }): Promise<BrainEraseResponse> {
+    // Short timeout: erase is a few indexed deletes. The 420 s answer timeout would
+    // keep an account deletion (or a retention batch) hanging on a stuck brain.
+    const res = await this.doRequest('/v2/privacy/erase', req, BrainEraseResponseSchema, ERASE_TIMEOUT_MS);
+    if (!res.ok) throw new BrainErasureError(res.error ?? null);
+    return res;
   }
 
   async analyzeDocument(input: {
@@ -338,7 +363,7 @@ export class BrainClient {
     try {
       res = await request(url, {
         method: 'GET',
-        headers: { 'x-api-key': this.cfg.apiKey },
+        headers: this.headers(),
         signal: ctrl.signal,
       });
     } catch (err: unknown) {
@@ -382,22 +407,20 @@ export class BrainClient {
   private async doRequest<S extends z.ZodTypeAny>(
     path: string,
     body: unknown,
-    responseSchema: S
+    responseSchema: S,
+    timeoutMs: number = this.cfg.timeoutMs
   ): Promise<z.output<S>> {
     const url = `${this.cfg.baseUrl.replace(/\/$/, '')}${path}`;
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), this.cfg.timeoutMs);
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
     const started = Date.now();
-    logger.info('Brain request →', { url, timeoutMs: this.cfg.timeoutMs });
+    logger.info('Brain request →', { url, timeoutMs });
 
     let res;
     try {
       res = await request(url, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': this.cfg.apiKey,
-        },
+        headers: this.headers({ 'content-type': 'application/json' }),
         body: JSON.stringify(body),
         signal: ctrl.signal,
       });
@@ -485,7 +508,7 @@ export class BrainClient {
 
       res = await request(url, {
         method: 'POST',
-        headers: { 'x-api-key': this.cfg.apiKey },
+        headers: this.headers(),
         body: form,
         signal: ctrl.signal,
       });
@@ -550,6 +573,19 @@ export class BrainClient {
     }
     this.recordSuccess();
     return parsed.data;
+  }
+
+  /**
+   * Shared outbound headers. `X-Subject-Id` = the logged-in user on whose behalf
+   * the call is made (request context, see utils/requestContext.ts); the brain
+   * stores an HMAC of it on every audit row so KVKK erasure can find all of a
+   * user's rows. Absent outside a request (jobs).
+   */
+  private headers(extra: Record<string, string> = {}): Record<string, string> {
+    const h: Record<string, string> = { ...extra, 'x-api-key': this.cfg.apiKey };
+    const subject = currentSubjectId();
+    if (subject) h['x-subject-id'] = subject;
+    return h;
   }
 
   private isRetriable(err: BrainError): boolean {

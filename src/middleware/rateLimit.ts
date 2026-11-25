@@ -28,3 +28,28 @@ export const mailLimiter = rateLimit({
   keyGenerator: (req) => req.user?.id ?? req.ip ?? 'anon',
   message: { error: { code: 'RATE_LIMITED', message: 'E-posta gönderim limiti aşıldı, lütfen sonra tekrar deneyin' } },
 });
+
+// Login / signup — brute-force & credential-stuffing guard: 20 FAILED attempts /
+// 15 min per IP. Successful logins/signups (status < 400) don't consume the budget,
+// so users behind a shared IP (office NAT) aren't locked out by normal use.
+export const authLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 20,
+  skipSuccessfulRequests: true,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMITED', message: 'Çok fazla deneme, lütfen 15 dakika sonra tekrar deneyin' } },
+});
+
+// KVKK veri dışa aktarma (GET /api/user/me/export) — her çağrı kullanıcının bütün
+// verisini okur: kullanıcı başına saatte 5. Mounted after requireAuth, so the key
+// is the user id; the IP fallback is never hit in practice. (express-rate-limit 7.x
+// has no IPv6 keyGenerator validation — on a v8 upgrade wrap it in ipKeyGenerator.)
+export const exportLimiter = rateLimit({
+  windowMs: 60 * 60_000,
+  limit: 5,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id ?? req.ip ?? 'anon',
+  message: { error: { code: 'RATE_LIMITED', message: 'Veri dışa aktarma limiti aşıldı, lütfen bir saat sonra tekrar deneyin' } },
+});

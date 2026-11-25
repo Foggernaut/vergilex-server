@@ -38,6 +38,13 @@ const envSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
 
   SIGNUP_BONUS_CREDITS: z.coerce.number().int().nonnegative().default(500),
+  // KVKK saklama: soft-delete edilmiş sohbetler bu kadar gün sonra kalıcı silinir (0 = kapalı).
+  // Boş string (Railway'de boş bırakılmış değişken) varsayılana (30) düşer — aksi halde
+  // coerce '' → 0 olup saklamayı SESSİZCE kapatırdı.
+  RETENTION_DELETED_CONVERSATION_DAYS: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.coerce.number().int().nonnegative().default(30)
+  ),
 
   // Belge Bul Geçmiş: arama sonuçlarının (search_results) saklanma süresi, gün. 0 = saklama KAPALI
   // (kapatma anahtarı: yeni kayıt yok, tablo boşalır, okumalar boş döner). Boş string (Railway'de boş

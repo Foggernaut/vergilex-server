@@ -475,6 +475,19 @@ export const BrainFeedbackResponseSchema = z.object({
 });
 export type BrainFeedbackResponse = z.infer<typeof BrainFeedbackResponseSchema>;
 
+// --- v2 privacy erase (KVKK md.11 hesap silme) ---
+
+// The brain answers 200 + `{ok:false, error}` when erasure fails (older brains: 503).
+// Counts default to 0 so an `ok:false` body without them still parses and the
+// failure is reported as such (not as a schema mismatch).
+export const BrainEraseResponseSchema = z.object({
+  ok: z.boolean(),
+  requests_deleted: z.number().int().nonnegative().default(0),
+  feedback_deleted: z.number().int().nonnegative().default(0),
+  error: z.string().nullable().optional(),
+});
+export type BrainEraseResponse = z.infer<typeof BrainEraseResponseSchema>;
+
 // --- v2 analyze-document ---
 
 export const BrainAnalyzeChunkPreviewSchema = z.object({

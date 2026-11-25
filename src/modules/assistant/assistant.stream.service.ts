@@ -7,8 +7,8 @@ import {
   assistantChatCost,
   assistantFollowUpCost,
 } from '../../utils/creditCosts.js';
-import { getBalance } from '../credits/credits.service.js';
-import { InsufficientCreditsError, NotFoundError } from '../../utils/errors.js';
+import { assertCanAfford } from '../credits/credits.service.js';
+import { NotFoundError } from '../../utils/errors.js';
 import { logger } from '../../config/logger.js';
 import type { SseWriter } from '../../utils/sse.js';
 import {
@@ -113,12 +113,6 @@ export async function streamAssistantFollowUp(
 }
 
 // ── internals ──────────────────────────────────────────────────────────────
-
-async function assertCanAfford(userId: string, cost: number): Promise<void> {
-  if (cost <= 0) return;
-  const balance = await getBalance(userId);
-  if (balance < cost) throw new InsufficientCreditsError();
-}
 
 async function pipe(
   sse: SseWriter,

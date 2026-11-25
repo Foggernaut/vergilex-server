@@ -51,6 +51,13 @@ export class BrainNotFoundError extends BrainError {
   }
 }
 
+// Brain answered the KVKK erase call but reported it did not complete (`ok:false`).
+export class BrainErasureError extends BrainError {
+  constructor(details?: unknown) {
+    super(503, 'BRAIN_ERASURE_FAILED', 'Servis şu anda kullanılamıyor', 'Brain audit erasure reported ok:false', details);
+  }
+}
+
 // Thrown when the brain lacks the streaming endpoint (404) — signals the caller
 // to fall back to the buffered answerV2 path so an un-upgraded brain still works.
 export class BrainStreamUnsupportedError extends BrainError {
