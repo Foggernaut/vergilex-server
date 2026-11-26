@@ -428,6 +428,9 @@ export type BrainStreamEvent =
   | { type: 'layer1'; documents: BrainDocumentResult[] }
   | { type: 'layer2'; corpus: string; label: string; summary: string }
   | { type: 'layer3_delta'; text: string }
+  // Model reddi: brain akan taslağı attı, yedek model yeniden akıtacak → istemci taslağı silsin.
+  | { type: 'answer_reset' }
+  | { type: 'layer3_reset' }
   | { type: 'complete'; response: BrainAnswerResponse }
   | { type: 'error'; code: string; message: string };
 
