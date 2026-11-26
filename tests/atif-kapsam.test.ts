@@ -55,7 +55,7 @@ describe('assistant optional columns', () => {
   it('selects and writes only the columns included in this attempt', () => {
     const all = new Set<string>(OPTIONAL_COLS);
     expect(msgCols(all)).toContain('kaynak_envanteri, atif_kontrolu, kapsam_notu');
-    expect(Object.keys(optionalFields(answer, all)).sort()).toEqual(['atif_kontrolu', 'kapsam_notu', 'kaynak_envanteri']);
+    expect(Object.keys(optionalFields(answer, all)).sort()).toEqual(['atif_kontrolu', 'kapsam_notu', 'kaynak_envanteri', 'notlar']);
 
     const noAtif = new Set<string>(['kaynak_envanteri', 'kapsam_notu']);   // 021 kısmen eksik
     expect(msgCols(noAtif)).not.toContain('atif_kontrolu');
