@@ -54,6 +54,7 @@ export interface AssistantPersistResult {
     // Radar 2026-11-20: atıf başına doğrulama durumu + 'Taranan kaynaklar' kapsam notu (migration 021).
     atif_kontrolu?: BrainAnswerResponse['atif_kontrolu'] | null;
     kapsam_notu?: BrainAnswerResponse['kapsam_notu'] | null;
+    notlar?: BrainAnswerResponse['notlar'] | null;
     position_level?: string | null;
     position_score?: number | null;
     position_rationale?: string | null;
@@ -77,7 +78,8 @@ export interface AssistantPersistResult {
   };
 }
 
-// Asistan mesaj satırı kolonları. `kaynak_envanteri` (migration 018), `atif_kontrolu` + `kapsam_notu` (021)
+// Asistan mesaj satırı kolonları. `kaynak_envanteri` (migration 018), `atif_kontrolu` + `kapsam_notu` (021),
+// `notlar` (026: NOT_KIPI=yapisal iken metinden çıkarılan otomatik notlar)
 // OPSİYONEL: ürün DB'sine henüz uygulanmadıysa sorgu yalnız eksik kolonsuz tekrar denenir
 // (withOptionalColumns) — kayıt/geçmiş kırılmaz, diğer kolonlar korunur.
 const MSG_COLS =
@@ -85,7 +87,8 @@ const MSG_COLS =
 const ENVANTER_COL = 'kaynak_envanteri';
 const ATIF_COL = 'atif_kontrolu';
 const KAPSAM_COL = 'kapsam_notu';
-export const OPTIONAL_COLS = [ENVANTER_COL, ATIF_COL, KAPSAM_COL] as const;
+const NOTLAR_COL = 'notlar';
+export const OPTIONAL_COLS = [ENVANTER_COL, ATIF_COL, KAPSAM_COL, NOTLAR_COL] as const;
 export const msgCols = (cols: ReadonlySet<string>): string =>
   [MSG_COLS, ...OPTIONAL_COLS.filter((c) => cols.has(c))].join(', ');
 
@@ -98,6 +101,7 @@ export function optionalFields(
     [ENVANTER_COL]: answer.kaynak_envanteri ?? null,
     [ATIF_COL]: answer.atif_kontrolu ?? null,
     [KAPSAM_COL]: answer.kapsam_notu ?? null,
+    [NOTLAR_COL]: answer.notlar ?? null,
   };
   return Object.fromEntries(Object.entries(all).filter(([k]) => cols.has(k)));
 }
@@ -121,7 +125,7 @@ function tokensJsonb(answer: BrainAnswerResponse) {
  * from memory. This is what makes the live turn correct even when the row itself
  * couldn't carry the signal columns (migration 016 not yet applied).
  */
-function shapeMessage(
+export function shapeMessage(
   assistantMsg: Record<string, unknown>,
   answer: BrainAnswerResponse
 ): AssistantPersistResult['message'] {
@@ -132,6 +136,7 @@ function shapeMessage(
     kaynak_envanteri: answer.kaynak_envanteri ?? null,
     atif_kontrolu: answer.atif_kontrolu ?? null,
     kapsam_notu: answer.kapsam_notu ?? null,
+    notlar: answer.notlar ?? null,
   };
 }
 
